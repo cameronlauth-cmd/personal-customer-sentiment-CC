@@ -292,6 +292,159 @@ KEY_PHRASE: [Most concerning customer statement - especially executive mentions 
 
         return analysis
 
+    def analyze_incremental(
+        self,
+        case_number: int,
+        customer_name: str,
+        context_summary: str,
+        new_messages_json: str,
+        analysis_context: str = None
+    ) -> dict:
+        """Analyze only new messages with historical context.
+
+        Used for incremental analysis when case history is cached.
+
+        Args:
+            case_number: Case identifier
+            customer_name: Customer name
+            context_summary: Summary of previous messages from cache
+            new_messages_json: JSON string of only NEW messages to analyze
+            analysis_context: Optional context override
+
+        Returns:
+            Dictionary with frustration analysis for new messages
+        """
+        context = analysis_context or TRUENAS_CONTEXT
+
+        prompt = f"""Analyze these NEW messages from an ongoing support case.
+
+CASE CONTEXT:
+Customer: {customer_name}
+Case Number: {case_number}
+
+{context}
+
+PREVIOUS INTERACTION SUMMARY:
+{context_summary if context_summary else "No previous context available - this appears to be a new case."}
+
+NEW MESSAGES TO ANALYZE (these are the latest updates):
+{new_messages_json}
+
+Analyze each NEW message for frustration level using this scale (0-10):
+- 0: Neutral/positive, thankful, satisfied
+- 1-2: Minor concern, patient inquiry
+- 3-4: Some impatience, mild disappointment
+- 5-6: Clear disappointment, patience wearing thin
+- 7-8: Frustration visible, executive involvement, questioning value
+- 9-10: Extreme anger, trust broken, threats to leave
+
+CRITICAL SIGNALS (score 7+ minimum):
+- Executive mentions: "execs", "management", "leadership", "CEO", "CTO"
+- Replacement threats: "replace", "switch", "looking at alternatives"
+- Trust erosion: "losing confidence", "disappointed", "unacceptable"
+- Business impact: "production down", "costing us", "affecting operations"
+
+Respond with:
+
+1. JSON array of new message scores:
+[
+  {{"msg": 1, "score": X, "reason": "brief reason"}},
+  ...
+]
+
+2. OVERALL_NEW_FRUSTRATION: [0-10 score for the new messages]
+
+3. TREND_VS_HISTORY: [Is frustration INCREASING, STABLE, or DECREASING compared to context?]
+
+4. NEW_MESSAGE_SUMMARY: [1-2 sentence summary of what happened in these new messages]
+
+5. UPDATED_CONTEXT_SUMMARY: [Updated 2-3 sentence summary incorporating these new messages into the overall case narrative]"""
+
+        system = "You are analyzing NEW messages in an ongoing support case. You have context about previous interactions. Focus on how the customer sentiment is evolving and whether frustration is increasing or decreasing."
+
+        try:
+            response = self._call_api(MODELS["haiku"], system, prompt)
+            return self._parse_incremental_response(response)
+        except Exception as e:
+            return {
+                "frustration_score": 0,
+                "trend": "stable",
+                "new_message_summary": "",
+                "updated_context_summary": "",
+                "analysis_model": "Claude 3.5 Haiku (Error)",
+                "analysis_successful": False,
+                "error": str(e)
+            }
+
+    def _parse_incremental_response(self, content: str) -> dict:
+        """Parse the incremental analysis response.
+
+        Args:
+            content: Raw response content
+
+        Returns:
+            Parsed analysis dictionary
+        """
+        # Parse message scores from JSON
+        message_scores = []
+        try:
+            json_match = re.search(r'\[.*?\]', content, re.DOTALL)
+            if json_match:
+                scores_json = json_match.group()
+                message_scores = json.loads(scores_json)
+        except Exception:
+            message_scores = []
+
+        # Calculate overall score from new messages
+        if message_scores:
+            scores_only = [s.get('score', 0) for s in message_scores]
+            average_score = np.mean(scores_only)
+            peak_score = max(scores_only)
+            # Weight peak more heavily for new messages
+            final_score = round((peak_score * 0.6) + (average_score * 0.4))
+        else:
+            final_score = 5
+
+        # Parse other fields
+        analysis = {
+            "frustration_score": min(10, max(0, final_score)),
+            "message_scores": message_scores,
+            "trend": "stable",
+            "new_message_summary": "",
+            "updated_context_summary": "",
+            "analysis_model": "Claude 3.5 Haiku (Incremental)",
+            "analysis_successful": True,
+        }
+
+        for line in content.split('\n'):
+            line = line.strip()
+
+            if line.startswith('OVERALL_NEW_FRUSTRATION:'):
+                try:
+                    score_text = line.replace('OVERALL_NEW_FRUSTRATION:', '').strip()
+                    score_match = re.search(r'\d+', score_text)
+                    if score_match:
+                        analysis['frustration_score'] = min(10, max(0, int(score_match.group())))
+                except:
+                    pass
+
+            elif line.startswith('TREND_VS_HISTORY:'):
+                trend_text = line.replace('TREND_VS_HISTORY:', '').strip().lower()
+                if 'increas' in trend_text:
+                    analysis['trend'] = 'declining'  # Increasing frustration = declining relationship
+                elif 'decreas' in trend_text:
+                    analysis['trend'] = 'improving'
+                else:
+                    analysis['trend'] = 'stable'
+
+            elif line.startswith('NEW_MESSAGE_SUMMARY:'):
+                analysis['new_message_summary'] = line.replace('NEW_MESSAGE_SUMMARY:', '').strip()
+
+            elif line.startswith('UPDATED_CONTEXT_SUMMARY:'):
+                analysis['updated_context_summary'] = line.replace('UPDATED_CONTEXT_SUMMARY:', '').strip()
+
+        return analysis
+
     def quick_score(
         self,
         case: dict,
@@ -916,3 +1069,89 @@ Base your assessment on the timeline patterns identified above."""
             summary[current_field] = ' '.join(field_content).strip()
 
         return summary
+
+    def generate_timeline_entries(
+        self,
+        case: dict,
+        new_messages: List[Dict],
+        analysis_context: str = None
+    ) -> List[Dict]:
+        """Generate timeline entries for specific new messages.
+
+        Used for appending to existing timelines when new messages arrive.
+        Part of the three-gate architecture (Gate 3 append mode).
+
+        Args:
+            case: Case dictionary with existing data
+            new_messages: List of new message dicts with 'date', 'frustration', etc.
+            analysis_context: Optional context override
+
+        Returns:
+            List of new timeline entries to append
+        """
+        if not new_messages:
+            return []
+
+        context = analysis_context or TRUENAS_CONTEXT
+
+        # Build message text from new messages
+        message_texts = []
+        for msg in new_messages:
+            date = msg.get("date", "Unknown date")
+            text = msg.get("text", msg.get("message", ""))
+            frustration = msg.get("frustration", 0)
+            is_customer = msg.get("is_customer", True)
+            owner = "[CUSTOMER]" if is_customer else "[SUPPORT]"
+
+            if text:
+                message_texts.append(f"{owner} {date} (frustration: {frustration}/10):\n{text[:1000]}")
+
+        if not message_texts:
+            return []
+
+        messages_for_prompt = "\n\n---\n\n".join(message_texts)
+
+        # Truncate if too long
+        if len(messages_for_prompt) > TIMELINE_MESSAGE_LIMIT // 2:
+            messages_for_prompt = messages_for_prompt[:TIMELINE_MESSAGE_LIMIT // 2] + "\n\n[...truncated...]"
+
+        prompt = f"""Generate timeline entries for these NEW messages from an ongoing support case.
+
+CASE CONTEXT:
+Customer: {case.get('customer_name', 'Unknown')}
+Support Level: {case.get('support_level', 'Unknown')}
+Issue Severity: {case.get('severity', 'S4')}
+Case Status: {case.get('status', 'Unknown')}
+Case Duration: {case.get('case_age_days', 0)} days
+
+{context}
+
+NEW MESSAGES TO ANALYZE:
+{messages_for_prompt}
+
+For each logical group of messages (or individual critical messages), create a timeline entry:
+
+TIMELINE_ENTRY: [Message X - Date: MMM DD, YYYY] or [Messages X-Y - Date: MMM DD-DD, YYYY]
+SUMMARY: [Factual description of what happened]
+CUSTOMER_TONE: [Observed tone]
+FRUSTRATION_DETECTED: [Yes/No]
+FRUSTRATION_DETAIL: [If yes: Include exact customer quote in quotation marks]
+POSITIVE_ACTION_DETECTED: [Yes/No]
+POSITIVE_ACTION_DETAIL: [If yes: Include specific positive action or quote]
+SUPPORT_QUALITY: [Assessment of support response]
+RELATIONSHIP_IMPACT: [Effect on customer confidence]
+FAILURE_PATTERN_DETECTED: [Yes/No]
+FAILURE_PATTERN_DETAIL: [If yes: Describe the pattern]
+ANALYSIS: [Key insight about this interaction]
+
+Create entries for ALL new messages. Use single-message entries for any critical moments
+(escalations, executive mentions, outages, major frustration, resolutions)."""
+
+        system = "You are an enterprise customer experience analyst. Generate timeline entries for new support messages, maintaining consistency with existing timeline format."
+
+        try:
+            response = self._call_api(MODELS["sonnet"], system, prompt)
+            return self._parse_timeline_entries(response, case_data=None)
+        except Exception as e:
+            print(f"Error generating timeline entries: {e}")
+            return []

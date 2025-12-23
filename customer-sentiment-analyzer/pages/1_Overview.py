@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.dashboard.branding import COLORS, get_frustration_color
 from src.dashboard.styles import get_global_css, apply_plotly_theme
+from src.dashboard.filters import get_filtered_cases, get_view_mode_indicator_html
 
 # Page config
 st.set_page_config(
@@ -22,6 +23,24 @@ st.set_page_config(
 
 # Apply global CSS
 st.markdown(get_global_css(), unsafe_allow_html=True)
+
+# Sidebar with view mode toggle
+with st.sidebar:
+    st.markdown(f"""
+    <div style="text-align: center; padding: 0.5rem 0; border-bottom: 1px solid {COLORS['border']}; margin-bottom: 0.75rem;">
+        <h3 style="color: {COLORS['primary']}; margin: 0;">Customer Sentiment</h3>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # View Mode Toggle - always visible
+    view_mode = st.radio(
+        "View Mode",
+        ["Recent Issues", "All Cases"],
+        index=1 if st.session_state.get('view_mode', 'All Cases') == 'All Cases' else 0,
+        help="Recent Issues: Activity in last 14 days + negative sentiment",
+        key="overview_view_mode"
+    )
+    st.session_state['view_mode'] = view_mode
 
 
 def get_case_status(case: dict) -> str:
@@ -57,6 +76,15 @@ def main():
 
     results = st.session_state['analysis_results']
     cases = results.get("cases", [])
+
+    # Apply view mode filter
+    view_mode = st.session_state.get('view_mode', 'All Cases')
+    cases = get_filtered_cases(cases, view_mode)
+
+    # Show view mode indicator
+    indicator_html = get_view_mode_indicator_html(view_mode, len(cases), COLORS)
+    if indicator_html:
+        st.markdown(indicator_html, unsafe_allow_html=True)
 
     # Header
     st.markdown(f"""

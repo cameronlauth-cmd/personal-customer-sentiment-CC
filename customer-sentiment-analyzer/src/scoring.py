@@ -11,6 +11,7 @@ from typing import Dict, List, Tuple
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from datetime import datetime, timedelta
 from config.settings import (
     SEVERITY_WEIGHTS,
     ISSUE_CLASS_WEIGHTS,
@@ -19,6 +20,8 @@ from config.settings import (
     get_volume_points,
     get_age_points,
     get_engagement_points,
+    RECENT_WINDOW_DAYS,
+    TREND_THRESHOLD,
 )
 
 
@@ -612,3 +615,187 @@ def get_support_level_distribution(cases: List[Dict]) -> Dict:
         level = case.get('support_level', 'Unknown')
         distribution[level] = distribution.get(level, 0) + 1
     return distribution
+
+
+def calculate_recent_frustration(case: Dict, window_days: int = None) -> Dict:
+    """
+    Calculate recent vs historical frustration metrics for a case.
+
+    Uses message dates to determine which messages are "recent" and
+    calculates trend based on comparing recent to historical averages.
+
+    Args:
+        case: Case dictionary with case_data DataFrame
+        window_days: Days to consider as "recent" (default from settings)
+
+    Returns:
+        Dictionary with recent frustration metrics
+    """
+    window_days = window_days or RECENT_WINDOW_DAYS
+    cutoff = pd.Timestamp.now() - pd.Timedelta(days=window_days)
+
+    case_df = case.get('case_data')
+    if case_df is None or case_df.empty:
+        return {
+            'recent_frustration': 0,
+            'historical_frustration': 0,
+            'trend': 'stable',
+            'has_recent_activity': False,
+            'days_since_last_message': None
+        }
+
+    # Get frustration score from analysis
+    claude_analysis = case.get('claude_analysis', {})
+    base_frustration = claude_analysis.get('frustration_score', 0)
+    metrics = claude_analysis.get('frustration_metrics', {})
+    message_scores = metrics.get('message_scores', [])
+
+    # Parse message dates
+    try:
+        case_df['Message Date'] = pd.to_datetime(case_df['Message Date'])
+        recent_mask = case_df['Message Date'] >= cutoff
+        recent_count = recent_mask.sum()
+        total_count = len(case_df)
+        historical_count = total_count - recent_count
+
+        # Get most recent message date
+        latest_date = case_df['Message Date'].max()
+        days_since = (pd.Timestamp.now() - latest_date).days if pd.notna(latest_date) else None
+    except:
+        return {
+            'recent_frustration': base_frustration,
+            'historical_frustration': base_frustration,
+            'trend': 'stable',
+            'has_recent_activity': True,
+            'days_since_last_message': None
+        }
+
+    # If we have individual message scores, use them for more accurate calculation
+    if message_scores and len(message_scores) > 0:
+        # Estimate which scores are recent vs historical based on position
+        # (messages are typically in chronological order)
+        total_scored = len(message_scores)
+        recent_ratio = recent_count / total_count if total_count > 0 else 0
+
+        # Estimate how many of the scored messages are "recent"
+        recent_scored_count = max(1, int(total_scored * recent_ratio))
+
+        # Recent scores are the last N scores
+        recent_scores = [s.get('score', 0) for s in message_scores[-recent_scored_count:]]
+        historical_scores = [s.get('score', 0) for s in message_scores[:-recent_scored_count]]
+
+        recent_avg = np.mean(recent_scores) if recent_scores else 0
+        historical_avg = np.mean(historical_scores) if historical_scores else recent_avg
+    else:
+        # Fallback: use overall frustration score for both
+        recent_avg = base_frustration
+        historical_avg = base_frustration
+
+    # Determine trend
+    if recent_count == 0:
+        trend = 'stable'
+    elif recent_avg > historical_avg + TREND_THRESHOLD:
+        trend = 'declining'  # Higher frustration = relationship declining
+    elif recent_avg < historical_avg - TREND_THRESHOLD:
+        trend = 'improving'
+    else:
+        trend = 'stable'
+
+    return {
+        'recent_frustration': round(recent_avg, 1),
+        'historical_frustration': round(historical_avg, 1),
+        'trend': trend,
+        'has_recent_activity': recent_count > 0,
+        'days_since_last_message': days_since,
+        'recent_message_count': int(recent_count),
+        'total_message_count': int(total_count)
+    }
+
+
+def add_recent_metrics_to_cases(cases: List[Dict], window_days: int = None) -> List[Dict]:
+    """
+    Add recent frustration metrics to all cases.
+
+    Args:
+        cases: List of case dictionaries
+        window_days: Days to consider as "recent"
+
+    Returns:
+        Updated list of cases with recent metrics
+    """
+    for case in cases:
+        recent_metrics = calculate_recent_frustration(case, window_days)
+        case['recent_metrics'] = recent_metrics
+
+        # Add to score breakdown if present
+        if 'score_breakdown' in case:
+            case['score_breakdown']['recent_frustration'] = recent_metrics['recent_frustration']
+            case['score_breakdown']['trend'] = recent_metrics['trend']
+
+    return cases
+
+
+def get_cases_by_trend(cases: List[Dict], trend: str = 'declining') -> List[Dict]:
+    """
+    Filter cases by their sentiment trend.
+
+    Args:
+        cases: List of case dictionaries with recent_metrics
+        trend: Trend to filter by ('declining', 'stable', 'improving')
+
+    Returns:
+        Filtered list of cases
+    """
+    return [
+        case for case in cases
+        if case.get('recent_metrics', {}).get('trend') == trend
+    ]
+
+
+def get_cases_needing_attention(
+    cases: List[Dict],
+    min_recent_frustration: float = 7.0,
+    include_declining: bool = True
+) -> List[Dict]:
+    """
+    Get cases that need attention based on recent activity.
+
+    Flags cases where:
+    1. Recent frustration is high (>= min_recent_frustration)
+    2. Trend is declining (if include_declining is True)
+    3. Has recent activity
+
+    Args:
+        cases: List of case dictionaries
+        min_recent_frustration: Minimum recent frustration to flag
+        include_declining: Also include cases with declining trend
+
+    Returns:
+        List of cases needing attention, sorted by recent frustration
+    """
+    attention_cases = []
+
+    for case in cases:
+        metrics = case.get('recent_metrics', {})
+
+        if not metrics.get('has_recent_activity', False):
+            continue
+
+        recent_frust = metrics.get('recent_frustration', 0)
+        trend = metrics.get('trend', 'stable')
+
+        needs_attention = (
+            recent_frust >= min_recent_frustration or
+            (include_declining and trend == 'declining')
+        )
+
+        if needs_attention:
+            attention_cases.append(case)
+
+    # Sort by recent frustration descending
+    attention_cases.sort(
+        key=lambda x: x.get('recent_metrics', {}).get('recent_frustration', 0),
+        reverse=True
+    )
+
+    return attention_cases

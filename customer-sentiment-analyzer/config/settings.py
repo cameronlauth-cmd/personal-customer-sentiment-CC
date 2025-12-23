@@ -15,13 +15,34 @@ MAX_RETRIES = 3
 RETRY_DELAY = 1.0  # seconds
 MAX_TOKENS = 4096
 
-# Analysis Thresholds
+# Analysis Thresholds (legacy - used when cache not provided)
 TOP_QUICK_SCORE = 25  # Cases for Stage 2A quick scoring
 TOP_DETAILED = 10     # Cases for Stage 2B detailed timeline
+
+# Three-Gate Architecture Thresholds
+GATE1_AVG_THRESHOLD = 3           # Avg frustration to trigger Gate 2 (Sonnet quick)
+GATE1_PEAK_THRESHOLD = 6          # Peak frustration to trigger Gate 2 (Sonnet quick)
+GATE2_CRITICALITY_THRESHOLD = 150 # Criticality score to trigger Gate 3 (timeline)
 
 # Message Limits for API Calls
 TIMELINE_MESSAGE_LIMIT = 300000    # 300KB for timeline generation (was 150KB)
 EXECUTIVE_SUMMARY_LIMIT = 25000    # 25KB for executive summary generation (was 15KB)
+
+# Cache Configuration for Incremental Analysis
+CACHE_FILE = "data/analysis_cache.json"
+RECENT_WINDOW_DAYS = 14           # Days to consider as "recent" for trend analysis
+TREND_THRESHOLD = 1.5             # Score difference to flag as "declining" or "improving"
+HIGH_RECENT_FRUSTRATION = 7.0     # Minimum recent frustration to flag for attention
+
+# Closed Case Status Values (from Salesforce)
+CLOSED_STATUSES = [
+    "Closed",
+    "Closed No Response",
+    "Closed Duplicate",
+    "Closed Spam",
+    "Closed-Test",
+    "Closed-NA"
+]
 
 # Scoring Weights
 SEVERITY_WEIGHTS = {

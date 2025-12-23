@@ -23,22 +23,59 @@ python -m pip install -r requirements.txt
 
 ## Architecture
 
-### Three-Stage Analysis Pipeline
+### Three-Gate Analysis Pipeline
 
-The system uses a hybrid AI approach combining cost-effective bulk analysis with premium deep analysis:
+The system uses a threshold-based gate architecture for efficient API cost management:
 
-**Stage 1 - Claude Haiku (All Cases):** Analyzes every message in every case for frustration scoring (0-10), issue classification, and resolution outlook. Fast and cost-effective for high-volume processing.
+**Gate 1 - Claude Haiku (All New Messages):** Scores new messages only, updates running avg/peak frustration. Cases pass Gate 1 when: Avg frustration >= 3 OR Peak frustration >= 6.
 
-**Stage 2A - Claude Sonnet (Top 25):** Re-analyzes top-ranked cases for secondary frustration/damage frequency assessment. Adds priority bonus points to criticality scores.
+**Gate 2 - Claude Sonnet Quick (Gate 1 Cases):** Full criticality scoring on cases that passed Gate 1. Cases pass Gate 2 when: Criticality score >= 175. Failed Gate 2 cases have their Sonnet analysis cached for re-evaluation on next upload.
 
-**Stage 2B - Claude Sonnet (Top 10):** Deep timeline analysis with message-level chronology, ownership attribution ([CUSTOMER]/[SUPPORT]), sentiment evolution, and executive summaries.
+**Gate 3 - Claude Sonnet Timeline (Gate 2 Cases):** Deep timeline analysis with message-level chronology, ownership attribution ([CUSTOMER]/[SUPPORT]), sentiment evolution, and executive summaries. Timelines persist until case closure. New messages append to existing timelines.
 
 ### Data Flow
 
 ```
-Excel Upload → DataLoader → Stage 1 (Haiku) → Criticality Scoring → Rank
-    → Stage 2A (Sonnet quick) → Re-rank → Stage 2B (Sonnet deep) → Dashboard
+┌─────────────────────────────────────────────────────────────────┐
+│                    SCORE REPOSITORY (Cache)                     │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                    New messages uploaded
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    GATE 1: HAIKU SCREENING                      │
+│  PASS: Avg frustration >= 3 OR Peak frustration >= 6           │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┴───────────────┐
+         GATE 1 FAIL                     GATE 1 PASS
+              │                               │
+              ▼                               ▼
+     Update scores only          ┌────────────────────────────────┐
+                                 │      GATE 2: SONNET QUICK      │
+                                 │  PASS: Criticality >= 175      │
+                                 │  FAIL: Cache, re-eval next     │
+                                 └────────────────────────────────┘
+                                              │
+                              ┌───────────────┴───────────────┐
+                         GATE 2 FAIL                     GATE 2 PASS
+                              │                               │
+                              ▼                               ▼
+                    Cache Sonnet result    ┌──────────────────────────────┐
+                    Back to pool           │  GATE 3: TIMELINE GENERATION │
+                                           │  - New: Generate full timeline│
+                                           │  - Existing: Append entries   │
+                                           │  - Persist until CLOSED       │
+                                           └──────────────────────────────┘
 ```
+
+### Legacy Mode
+
+When no cache is provided, the system falls back to top-N selection:
+- Stage 1: Haiku on all cases
+- Stage 2A: Sonnet quick on top 25
+- Stage 2B: Sonnet timeline on top 10
 
 ### Key Components
 
