@@ -1,0 +1,48 @@
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data files (may contain sensitive customer info)
+data/input/*.xlsx
+data/input/*.xls
+data/input/*.csv
+data/last_analysis.json
+data/debug/
+
+# Reports output
+reports/
+*.html
+!templates/*.html
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/
+
+# Claude plans
+.claude/plans/

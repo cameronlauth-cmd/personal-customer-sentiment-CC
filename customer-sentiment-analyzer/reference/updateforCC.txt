@@ -1,0 +1,2700 @@
+PART1_VERSION = "1.2.0"
+
+PART1_MODIFIED = "2024-12-20"
+
+PART2_VERSION = "1.5.3"
+
+PART2_MODIFIED = "2025-12-08"
+
+PART3_VERSION = "1.1.1"
+
+PART3_MODIFIED = "2024-12-20"
+
+PART4_VERSION = "1.2.0"
+
+PART4_MODIFIED = "2024-12-20"
+
+import pandas as pd
+
+import numpy as np
+
+import json
+
+import time
+
+import io
+
+import matplotlib.pyplot as plt
+
+from datetime import datetime
+
+from reportlab.lib.pagesizes import letter
+
+from reportlab.platypus import (
+    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak
+)
+
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+from reportlab.lib.units import inch
+
+from reportlab.lib import colors
+
+from reportlab.lib.colors import HexColor
+
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+
+from abacusai import AgentResponse, ApiClient, Blob
+
+def extract_tech_info_from_message(message_text):
+    """Extract tech name and role from email signature"""
+    if pd.isna(message_text):
+        return None
+    
+    import re
+    msg_str = str(message_text).lower()
+    
+    # Look for common signature patterns at the end of message
+    # Pattern: Name followed by role/title
+    # Example: "John Doe, Tier 2 Software Support" or "Jane Smith\nSenior Support Engineer"
+    
+    # Split into lines and check last 10 lines for signature
+    lines = message_text.split('\n')
+    signature_lines = lines[-10:] if len(lines) > 10 else lines
+    
+    for i, line in enumerate(signature_lines):
+        line_lower = line.lower()
+        # Look for support role keywords
+        if any(keyword in line_lower for keyword in ['tier 1', 'tier 2', 'tier 3', 'support engineer', 
+                                                       'technical support', 'senior support', 'support specialist',
+                                                       'software support', 'hardware support', 'escalation engineer']):
+            # The name is likely in the line above or same line
+            if i > 0:
+                potential_name = signature_lines[i-1].strip()
+                # Check if it looks like a name (2-4 words, capitalized, no @)
+                if potential_name and '@' not in potential_name and len(potential_name.split()) <= 4:
+                    # Clean up common email artifacts
+                    potential_name = re.sub(r'(regards|thanks|best|sincerely),?\s*', '', potential_name, flags=re.IGNORECASE)
+                    if len(potential_name) > 2:
+                        return {
+                            'name': potential_name.strip(),
+                            'role': line.strip()
+                        }
+            
+            # Check if name and role are on same line (e.g., "John Doe, Tier 2 Support")
+            match = re.search(r'([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*[,\-]\s*', line)
+            if match:
+                return {
+                    'name': match.group(1).strip(),
+                    'role': line.strip()
+                }
+    
+    return None
+
+def build_tech_map_for_case(case_data):
+    """Build a map of tech emails to their names/roles from message signatures"""
+    tech_map = {}
+    
+    for _, row in case_data.iterrows():
+        msg = row.get('Message', '')
+        if pd.isna(msg):
+            continue
+        
+        msg_str = str(msg)
+        
+        # Check if this looks like a tech response (has esupport@ or other @ixsystems.com)
+        if '@ixsystems.com' in msg_str.lower():
+            # Extract the email
+            import re
+            emails = re.findall(r'([\w\.-]+@ixsystems\.com)', msg_str, re.IGNORECASE)
+            
+            # Extract tech info from signature
+            tech_info = extract_tech_info_from_message(msg_str)
+            
+            if tech_info and emails:
+                for email in emails:
+                    if email.lower() not in tech_map:
+                        tech_map[email.lower()] = tech_info
+    
+    return tech_map
+
+def load_and_prepare_data(excel_file, client):
+    """Load Excel file and prepare dataframe"""
+    if isinstance(excel_file, list):
+        excel_file = excel_file[0]
+    
+    if not hasattr(excel_file, "contents"):
+        raise ValueError("Expected file object with 'contents' attribute")
+    
+    try:
+        df = pd.read_excel(io.BytesIO(excel_file.contents), engine="openpyxl")
+        client.stream_message(f"✓ Loaded Excel file: {len(df)} records\n\n")
+    except Exception as e:
+        try:
+            df = pd.read_excel(io.BytesIO(excel_file.contents), engine="xlrd")
+            client.stream_message(f"✓ Loaded Excel file: {len(df)} records\n\n")
+        except Exception as e2:
+            raise ValueError(f"Failed to load Excel file: {str(e)}")
+    
+    # ✅ FIX: Define current_date at the beginning
+    current_date = datetime.now()
+    
+    df.columns = df.columns.str.strip()
+    column_mapping = {col.lower(): col for col in df.columns}
+    
+    required_columns_map = {
+        "case number": ["case number", "case_number", "casenumber", "case no", "case#"],
+        "customer name": ["account name", "account_name", "accountname", "customer name", "customer_name", "customername", "customer"],
+        "message": ["text body", "text_body", "textbody", "message", "messages", "description", "comment", "text", "body"],
+        "message date": ["message date", "message_date", "messagedate", "email date", "email_date", "date", "timestamp", "message timestamp"],
+        "severity": ["severity", "priority", "level"],
+        "support level": ["support level", "support_level", "supportlevel", "tier", "support tier"],
+        "created date": ["created date", "created_date", "createddate", "date created", "create date", "opened date"],
+        "last modified date": ["last modified date", "last_modified_date", "lastmodifieddate", "modified date", "updated date", "last updated"],
+        "status": ["status", "state", "case status"],
+        "case age days": ["case age days", "case_age_days", "caseagedays", "age days", "age_days", "agedays", "case age", "case_age"],
+    }
+    
+    actual_columns = {}
+    for required_col, possible_names in required_columns_map.items():
+        found = False
+        for possible_name in possible_names:
+            if possible_name in column_mapping:
+                actual_columns[required_col] = column_mapping[possible_name]
+                found = True
+                break
+        if not found:
+            for col_lower, col_actual in column_mapping.items():
+                if any(pn in col_lower for pn in possible_names):
+                    actual_columns[required_col] = col_actual
+                    found = True
+                    break
+        if not found and required_col not in ["case age days", "created date", "last modified date", "status", "support level", "message date"]:
+            raise ValueError(f"Missing required column: {required_col}. Available: {list(df.columns)}")
+    
+    rename_dict = {
+        actual_columns["case number"]: "Case Number",
+        actual_columns["customer name"]: "Customer Name",
+        actual_columns["message"]: "Message",
+        actual_columns["severity"]: "Severity",
+    }
+    
+    if "support level" in actual_columns:
+        rename_dict[actual_columns["support level"]] = "Support Level"
+    if "message date" in actual_columns:
+        rename_dict[actual_columns["message date"]] = "Message Date"
+    if "created date" in actual_columns:
+        rename_dict[actual_columns["created date"]] = "Created Date"
+    if "last modified date" in actual_columns:
+        rename_dict[actual_columns["last modified date"]] = "Last Modified Date"
+    if "case age days" in actual_columns:
+        rename_dict[actual_columns["case age days"]] = "Case Age Days"
+    if "status" in actual_columns:
+        rename_dict[actual_columns["status"]] = "Status"
+    
+    df = df.rename(columns=rename_dict)
+    
+    df = df.dropna(subset=["Case Number", "Message"])
+    df["Customer Name"] = df["Customer Name"].fillna("Unknown Customer")
+    df["Severity"] = df["Severity"].fillna("S4")
+    
+    if "Support Level" not in df.columns:
+        df["Support Level"] = "Unknown"
+    else:
+        df["Support Level"] = df["Support Level"].fillna("Unknown")
+    
+    if "Message Date" in df.columns:
+        try:
+            df["Message Date"] = pd.to_datetime(df["Message Date"], errors="coerce")
+        except:
+            df["Message Date"] = pd.NaT
+        df["Message Date"] = df["Message Date"].fillna(current_date)
+    else:
+        if "Created Date" in df.columns:
+            df["Message Date"] = df["Created Date"]
+        else:
+            df["Message Date"] = current_date
+    
+    if "Status" not in df.columns:
+        df["Status"] = "Unknown"
+    else:
+        df["Status"] = df["Status"].fillna("Unknown")
+    
+    if "Created Date" in df.columns:
+        try:
+            df["Created Date"] = pd.to_datetime(df["Created Date"], errors="coerce")
+        except:
+            df["Created Date"] = pd.NaT
+        df["Created Date"] = df["Created Date"].fillna(current_date)
+    else:
+        df["Created Date"] = current_date
+    
+    if "Last Modified Date" in df.columns:
+        try:
+            df["Last Modified Date"] = pd.to_datetime(df["Last Modified Date"], errors="coerce")
+        except:
+            df["Last Modified Date"] = pd.NaT
+        df["Last Modified Date"] = df["Last Modified Date"].fillna(current_date)
+    else:
+        df["Last Modified Date"] = current_date
+    
+    if "Case Age Days" in df.columns:
+        df["case_age_days"] = pd.to_numeric(df["Case Age Days"], errors="coerce").fillna(0).astype(int)
+    else:
+        df["case_age_days"] = (current_date - df["Created Date"]).dt.days
+        df["case_age_days"] = df["case_age_days"].fillna(0).astype(int)
+    
+    def extract_severity(severity_str):
+        severity_str = str(severity_str).upper()
+        if "S1" in severity_str:
+            return "S1"
+        elif "S2" in severity_str:
+            return "S2"
+        elif "S3" in severity_str:
+            return "S3"
+        elif "S4" in severity_str:
+            return "S4"
+        else:
+            return "S4"
+    
+    df["Severity"] = df["Severity"].apply(extract_severity)
+    
+    return df, current_date
+
+def run_claude_analysis(df, analysis_context, client):
+    """Run Claude 3.5 Haiku analysis on all cases with message-by-message scoring"""
+    unique_cases = df["Case Number"].unique()
+    total_cases = len(unique_cases)
+    
+    client.stream_message("="*70 + "\n")
+    client.stream_message(f"STAGE 1: CLAUDE 3.5 HAIKU ANALYSIS\n")
+    client.stream_message(f"Analyzing {total_cases} cases with message-by-message scoring\n")
+    client.stream_message("="*70 + "\n\n")
+    
+    case_analysis = []
+    issue_categories = {}
+    support_level_distribution = {}
+    claude_statistics = {
+        "total_analyzed": 0,
+        "high_frustration": 0,
+        "medium_frustration": 0,
+        "low_frustration": 0,
+        "no_frustration": 0,
+        "avg_frustration_score": 0,
+        "total_frustration_score": 0,
+        "api_errors": 0,
+        "analysis_time_seconds": 0,
+        "total_messages_analyzed": 0,
+        "frustrated_messages_count": 0,
+    }
+    
+    start_time = time.time()
+    
+    for idx, case_num in enumerate(unique_cases, 1):
+        case_data = df[df["Case Number"] == case_num].copy()
+        
+        if idx % 5 == 0 or idx == 1:
+            progress_pct = (idx / total_cases) * 100
+            client.stream_message(f"[{idx}/{total_cases}] ({progress_pct:.1f}%) Claude analyzing...\n")
+        
+        first_row = case_data.iloc[0]
+        customer_name = str(first_row["Customer Name"])
+        severity = first_row["Severity"]
+        created_date = first_row["Created Date"]
+        last_modified = first_row["Last Modified Date"]
+        status = str(first_row["Status"])
+        case_age = int(first_row["case_age_days"])
+        
+        support_level_raw = str(first_row["Support Level"]).upper()
+        if "GOLD" in support_level_raw:
+            support_level = "Gold"
+        elif "SILVER" in support_level_raw:
+            support_level = "Silver"
+        elif "BRONZE" in support_level_raw:
+            support_level = "Bronze"
+        else:
+            support_level = "Unknown"
+        
+        if support_level in support_level_distribution:
+            support_level_distribution[support_level] += 1
+        else:
+            support_level_distribution[support_level] = 1
+        
+        interaction_count = len(case_data)
+        
+        case_data_sorted = case_data.sort_values('Message Date')
+        case_messages = case_data_sorted["Message"].tolist()
+        case_dates = case_data_sorted["Message Date"].tolist()
+        
+        # Build full message text for later use
+        all_messages_text = "\n\n---MESSAGE---\n\n".join([
+            f"[{case_dates[i].strftime('%b %d, %Y %I:%M %p') if isinstance(case_dates[i], pd.Timestamp) else 'Date Unknown'}] Msg {i+1}: {str(msg)}"
+            for i, msg in enumerate(case_messages)
+            if not pd.isna(msg)
+        ])
+        
+        # ============= HYBRID MESSAGE-BY-MESSAGE ANALYSIS =============
+        # Analyze each message individually, then combine scores
+        message_scores = []
+        messages_to_analyze = []
+        
+        # Prepare messages for batch analysis (limit each to 2000 chars)
+        for i, msg in enumerate(case_messages):
+            if pd.isna(msg):
+                continue
+            msg_str = str(msg).strip()
+            if len(msg_str) > 2000:
+                msg_str = msg_str[:2000] + "..."
+            messages_to_analyze.append({
+                'index': i + 1,
+                'date': case_dates[i].strftime('%b %d, %Y') if isinstance(case_dates[i], pd.Timestamp) else 'Unknown',
+                'text': msg_str
+            })
+        
+        # Create a batch prompt for analyzing all messages at once
+        messages_json = json.dumps(messages_to_analyze, indent=2)
+        
+        claude_prompt = f"""Analyze EACH message in this support case individually for frustration level.
+
+CASE CONTEXT:
+Customer: {customer_name}
+Support Level: {support_level} tier
+Case Duration: {case_age} days
+Total Messages: {interaction_count}
+Severity: {severity}
+
+{analysis_context}
+
+MESSAGES TO ANALYZE:
+{messages_json}
+
+IMPORTANT: Analyze EACH message independently for frustration signals.
+
+For each message, assess the frustration level (0-10) based on:
+- 0: Neutral/positive, thankful, satisfied
+- 1-3: Minor concern, patient inquiry, polite follow-up
+- 4-6: Growing impatience, disappointment, concern about timeline
+- 7-8: Clear frustration, questioning competence, escalation threats
+- 9-10: Extreme anger, trust broken, threats to leave/legal action
+
+Respond with a JSON structure for EACH message:
+[
+  {{"msg": 1, "score": X, "reason": "brief reason"}},
+  {{"msg": 2, "score": Y, "reason": "brief reason"}},
+  ...
+]
+
+Then provide overall assessment:
+ISSUE_CLASS: [What type of problem is this?]
+- Systemic: Overall system not meeting performance/reliability expectations
+- Environmental: Issues with how system fits in their environment (integration, compatibility)
+- Component: Specific hardware/software component problem
+- Procedural: Configuration issue, user error, or knowledge gap
+
+RESOLUTION_OUTLOOK: [How likely is permanent resolution?]
+- Challenging: May require significant changes or have no clear fix
+- Manageable: Can be resolved but may take time/effort
+- Straightforward: Clear path to resolution
+
+KEY_PHRASE: [Most concerning customer statement from any message]"""
+
+        try:
+            claude_response = client.evaluate_prompt(
+                prompt=claude_prompt,
+                system_message="You are analyzing customer support messages for frustration patterns. Evaluate EACH message independently for emotional signals, then identify overall patterns. Be precise and objective in scoring individual messages.",
+                llm_name="CLAUDE_V3_5_HAIKU",
+            )
+            
+            claude_content = claude_response.content.strip()
+            
+            # Parse message scores from JSON response
+            message_scores = []
+            try:
+                # Extract JSON array from response
+                import re
+                json_match = re.search(r'\[.*?\]', claude_content, re.DOTALL)
+                if json_match:
+                    scores_json = json_match.group()
+                    message_scores = json.loads(scores_json)
+                    claude_statistics["total_messages_analyzed"] += len(message_scores)
+                    
+                    # Count frustrated messages (score >= 4)
+                    frustrated_count = len([s for s in message_scores if s.get('score', 0) >= 4])
+                    claude_statistics["frustrated_messages_count"] += frustrated_count
+            except:
+                # Fallback if JSON parsing fails
+                message_scores = []
+            
+            # Calculate metrics for hybrid scoring
+            if message_scores:
+                scores_only = [s.get('score', 0) for s in message_scores]
+                
+                # Core metrics
+                average_score = np.mean(scores_only)
+                peak_score = max(scores_only)
+                frustrated_messages = [s for s in scores_only if s >= 4]
+                frustration_frequency = len(frustrated_messages) / len(scores_only)
+                
+                # Apply hybrid formula
+                if frustration_frequency < 0.2:  # Less than 20% frustrated
+                    final_score = average_score  # Use average for isolated incidents
+                elif frustration_frequency > 0.5:  # More than 50% frustrated
+                    final_score = (peak_score * 0.7) + (average_score * 0.3)  # Weight peak heavily
+                else:  # 20-50% frustrated
+                    final_score = (peak_score * 0.4) + (average_score * 0.6)  # Balanced
+                
+                # Round to nearest integer for consistency
+                final_score = round(final_score)
+                
+                # Store additional metrics
+                frustration_metrics = {
+                    'average_score': round(average_score, 2),
+                    'peak_score': peak_score,
+                    'frustration_frequency': round(frustration_frequency * 100, 1),
+                    'frustrated_message_count': len(frustrated_messages),
+                    'total_messages': len(scores_only),
+                    'message_scores': message_scores[:10]  # Store first 10 for reference
+                }
+            else:
+                # Fallback to single analysis if message-by-message fails
+                final_score = 5  # Default medium score
+                frustration_metrics = {
+                    'average_score': 5,
+                    'peak_score': 5,
+                    'frustration_frequency': 50,
+                    'frustrated_message_count': 1,
+                    'total_messages': len(messages_to_analyze),
+                    'message_scores': []
+                }
+            
+            # Parse other fields from response
+            claude_analysis = {
+                "frustration_score": min(10, max(0, final_score)),
+                "frustration_metrics": frustration_metrics,
+                "issue_class": "Procedural",  # Default to least severe
+                "resolution_outlook": "Straightforward",  # Default to simplest
+                "key_phrase": "",
+                "analysis_model": "Claude 3.5 Haiku (Hybrid)",
+                "analysis_successful": True,
+            }
+            
+            # Parse remaining fields from the response
+            for line in claude_content.split('\n'):
+                line = line.strip()
+                
+                if line.startswith('ISSUE_CLASS:'):
+                    class_text = line.replace('ISSUE_CLASS:', '').strip()
+                    # Check for each class type
+                    if 'Systemic' in class_text:
+                        claude_analysis['issue_class'] = 'Systemic'
+                    elif 'Environmental' in class_text:
+                        claude_analysis['issue_class'] = 'Environmental'
+                    elif 'Component' in class_text:
+                        claude_analysis['issue_class'] = 'Component'
+                    elif 'Procedural' in class_text:
+                        claude_analysis['issue_class'] = 'Procedural'
+                
+                elif line.startswith('RESOLUTION_OUTLOOK:'):
+                    outlook_text = line.replace('RESOLUTION_OUTLOOK:', '').strip()
+                    if 'Challenging' in outlook_text:
+                        claude_analysis['resolution_outlook'] = 'Challenging'
+                    elif 'Manageable' in outlook_text:
+                        claude_analysis['resolution_outlook'] = 'Manageable'
+                    elif 'Straightforward' in outlook_text:
+                        claude_analysis['resolution_outlook'] = 'Straightforward'
+                
+                elif line.startswith('KEY_PHRASE:'):
+                    phrase = line.replace('KEY_PHRASE:', '').strip()
+                    if phrase.lower() != "none":
+                        claude_analysis['key_phrase'] = phrase.strip('"').strip("'")
+            
+            # Extract excerpt for key phrase if found
+            claude_excerpt = None
+            if claude_analysis.get('key_phrase') and claude_analysis['key_phrase']:
+                phrase = claude_analysis['key_phrase']
+                phrase_lower = phrase.lower()
+                
+                for msg in case_messages:
+                    if pd.isna(msg):
+                        continue
+                    msg_str = str(msg).strip()
+                    msg_lower = msg_str.lower()
+                    
+                    if phrase_lower in msg_lower:
+                        phrase_pos = msg_lower.find(phrase_lower)
+                        start = max(0, phrase_pos - 250)
+                        end = min(len(msg_str), phrase_pos + len(phrase) + 250)
+                        
+                        excerpt_text = msg_str[start:end].strip()
+                        if start > 0:
+                            excerpt_text = "..." + excerpt_text
+                        if end < len(msg_str):
+                            excerpt_text = excerpt_text + "..."
+                        
+                        excerpt_lower = excerpt_text.lower()
+                        phrase_start = excerpt_lower.find(phrase_lower)
+                        
+                        if phrase_start != -1:
+                            before = excerpt_text[:phrase_start]
+                            matched = excerpt_text[phrase_start:phrase_start + len(phrase)]
+                            after = excerpt_text[phrase_start + len(phrase):]
+                            claude_excerpt = f'{before}<font color="#EA580C"><b>{matched}</b></font>{after}'
+                        else:
+                            claude_excerpt = excerpt_text
+                        
+                        break
+            
+            claude_analysis['excerpt'] = claude_excerpt
+            claude_statistics["total_analyzed"] += 1
+            claude_statistics["total_frustration_score"] += claude_analysis['frustration_score']
+            
+            if claude_analysis['frustration_score'] >= 7:
+                claude_statistics["high_frustration"] += 1
+            elif claude_analysis['frustration_score'] >= 4:
+                claude_statistics["medium_frustration"] += 1
+            elif claude_analysis['frustration_score'] >= 1:
+                claude_statistics["low_frustration"] += 1
+            else:
+                claude_statistics["no_frustration"] += 1
+            
+        except Exception as e:
+            claude_analysis = {
+                "frustration_score": 0,
+                "frustration_metrics": {
+                    'average_score': 0,
+                    'peak_score': 0,
+                    'frustration_frequency': 0,
+                    'frustrated_message_count': 0,
+                    'total_messages': len(messages_to_analyze),
+                    'message_scores': []
+                },
+                "issue_class": "Unknown",
+                "resolution_outlook": "Unknown",
+                "key_phrase": "",
+                "excerpt": None,
+                "analysis_model": "Claude 3.5 Haiku (Error)",
+                "analysis_successful": False,
+            }
+            claude_statistics["api_errors"] += 1
+        
+        issue_category = claude_analysis.get('issue_class', 'Unknown')
+        if issue_category in issue_categories:
+            issue_categories[issue_category] += 1
+        else:
+            issue_categories[issue_category] = 1
+        
+        customer_engagement_ratio = 0.6 if interaction_count > 2 else 0.3
+        
+        # Build tech map from message signatures
+        tech_map = build_tech_map_for_case(case_data)
+        
+        case_analysis.append({
+            "case_number": int(case_num),
+            "customer_name": customer_name,
+            "severity": severity,
+            "support_level": support_level,
+            "created_date": (
+                created_date.strftime("%Y-%m-%d")
+                if isinstance(created_date, pd.Timestamp)
+                else str(created_date)
+            ),
+            "last_modified_date": (
+                last_modified.strftime("%Y-%m-%d")
+                if isinstance(last_modified, pd.Timestamp)
+                else str(last_modified)
+            ),
+            "status": status,
+            "case_age_days": case_age,
+            "interaction_count": interaction_count,
+            "customer_engagement_ratio": float(customer_engagement_ratio),
+            "issue_category": issue_category,
+            "claude_analysis": claude_analysis,
+            "deepseek_analysis": None,
+            "messages_full": all_messages_text,
+            "case_data": case_data,
+            "tech_map": tech_map,
+        })
+    
+    claude_time = time.time() - start_time
+    claude_statistics["analysis_time_seconds"] = claude_time
+    claude_statistics["avg_frustration_score"] = (
+        claude_statistics["total_frustration_score"] / claude_statistics["total_analyzed"]
+        if claude_statistics["total_analyzed"] > 0 else 0
+    )
+    
+    client.stream_message("\n" + "="*70 + "\n")
+    client.stream_message(f"STAGE 1 COMPLETE: {claude_time:.1f} seconds\n")
+    client.stream_message(f"  Analyzed: {claude_statistics['total_analyzed']} cases\n")
+    client.stream_message(f"  Total Messages: {claude_statistics['total_messages_analyzed']}\n")
+    client.stream_message(f"  Frustrated Messages: {claude_statistics['frustrated_messages_count']} ({claude_statistics['frustrated_messages_count']/max(1,claude_statistics['total_messages_analyzed'])*100:.1f}%)\n")
+    client.stream_message(f"  High Frustration Cases: {claude_statistics['high_frustration']}\n")
+    client.stream_message(f"  Average Score: {claude_statistics['avg_frustration_score']:.2f}/10\n")
+    client.stream_message("="*70 + "\n\n")
+    
+    return case_analysis, claude_statistics, issue_categories, support_level_distribution, claude_time
+
+def claude_frustration_to_points(claude_score):
+    """
+    Convert Claude's 0-10 frustration score to 0-100 points
+    Uses logarithmic compression to create separation at high end
+    
+    Scale alignment:
+    10 = 100pts (Return order/Legal action)
+    9  = 96pts  (Won't renew/Relationship destroyed)
+    8  = 91pts  (Trust broken/Adversarial)
+    7  = 85pts  (High frustration/Strained)
+    5  = 70pts  (Moderate concern)
+    3  = 47pts  (Low frustration)
+    1  = 11pts  (Minimal)
+    0  = 0pts   (Satisfied)
+    """
+    if claude_score == 0:
+        return 0
+    
+    # Logarithmic compression
+    log_value = np.log(claude_score + 1) / np.log(11)
+    
+    # Scale to full 0-100 range
+    points = log_value * 100
+    
+    return round(points, 1)
+
+def calculate_criticality_scores(case_analysis, client):
+    """Calculate criticality scores for all cases"""
+    client.stream_message("Calculating initial criticality scores...\n\n")
+    
+    for case in case_analysis:
+        score = 0
+        score_breakdown = {}
+        
+        # PRIMARY DRIVER: Claude's frustration score with logarithmic curve
+        # Converts 0-10 to 0-100 points using log compression
+        raw_frustration = case['claude_analysis']['frustration_score']
+        frustration_points = claude_frustration_to_points(raw_frustration)
+        score += frustration_points
+        score_breakdown["claude_frustration"] = round(frustration_points, 1)
+        
+        severity_map = {"S1": 35, "S2": 25, "S3": 15, "S4": 5}
+        severity_points = severity_map.get(case["severity"], 5)
+        score += severity_points
+        score_breakdown["technical_severity"] = severity_points
+        
+        msg_count = case["interaction_count"]
+        if msg_count <= 2:
+            volume_points = 30
+        elif msg_count <= 5:
+            volume_points = 20
+        elif msg_count <= 10:
+            volume_points = 10
+        else:
+            volume_points = 5
+        score += volume_points
+        score_breakdown["interaction_volume"] = volume_points
+        
+        engagement_points = 15 if case["customer_engagement_ratio"] > 0.6 else 0
+        score += engagement_points
+        score_breakdown["customer_engagement"] = engagement_points
+        
+        age = case["case_age_days"]
+        if age >= 30:
+            age_points = 10
+        elif age >= 14:
+            age_points = 7
+        elif age >= 7:
+            age_points = 3
+        else:
+            age_points = 0
+        score += age_points
+        score_breakdown["case_age"] = age_points
+        
+        # NEW: Issue Class scoring (replaces churn risk)
+        issue_class = case['claude_analysis'].get('issue_class', 'Procedural')
+        issue_class_map = {
+            "Systemic": 30,      # Bumped up from 25 as requested
+            "Environmental": 15,
+            "Component": 10,
+            "Procedural": 5,
+            "Unknown": 0
+        }
+        issue_class_points = issue_class_map.get(issue_class, 0)
+        score += issue_class_points
+        score_breakdown["issue_class"] = issue_class_points
+        
+        # NEW: Resolution Outlook scoring
+        resolution_outlook = case['claude_analysis'].get('resolution_outlook', 'Straightforward')
+        resolution_map = {
+            "Challenging": 15,
+            "Manageable": 8,
+            "Straightforward": 0,
+            "Unknown": 0
+        }
+        resolution_points = resolution_map.get(resolution_outlook, 0)
+        score += resolution_points
+        score_breakdown["resolution_outlook"] = resolution_points
+        
+        support_level = case.get("support_level", "Unknown")
+        if support_level == "Gold":
+            support_level_points = 10
+        elif support_level == "Silver":
+            support_level_points = 5
+        else:
+            support_level_points = 0
+        score += support_level_points
+        score_breakdown["support_level_priority"] = support_level_points
+        
+        case["initial_criticality_score"] = score
+        case["score_breakdown"] = score_breakdown
+        case["criticality_score"] = score
+    
+    case_analysis.sort(key=lambda x: x["initial_criticality_score"], reverse=True)
+    return case_analysis
+
+def extract_frustrated_excerpts(case_data, frustrated_phrases):
+    """Extract message excerpts with timestamps"""
+    excerpts = []
+    seen_excerpts = set()
+    
+    def is_likely_boilerplate(text):
+        text_lower = text.lower().strip()
+        if len(text_lower) < 10:
+            return False
+        boilerplate_patterns = [
+            'subject:', 're:', 'fwd:', 'from:', 'sent:', 'to:',
+            'please do not reply', 'unsubscribe', 'confidential',
+        ]
+        return any(pattern in text_lower for pattern in boilerplate_patterns)
+    
+    def normalize_text(text):
+        normalized = text.lower().strip()
+        normalized = ' '.join(normalized.split())
+        return normalized.replace('!', '.').replace('?', '.')
+    
+    for phrase in frustrated_phrases:
+        if not phrase or len(phrase) < 3:
+            continue
+        
+        phrase_lower = phrase.lower()
+        
+        for msg_idx, row in case_data.iterrows():
+            msg = row["Message"]
+            if pd.isna(msg):
+                continue
+            msg_str = str(msg).strip()
+            msg_lower = msg_str.lower()
+            
+            if phrase_lower in msg_lower:
+                excerpt_text = msg_str.strip()
+                
+                if is_likely_boilerplate(excerpt_text):
+                    continue
+                
+                normalized_excerpt = normalize_text(excerpt_text)
+                if normalized_excerpt in seen_excerpts:
+                    continue
+                
+                is_duplicate = False
+                for seen in seen_excerpts:
+                    seen_words = set(seen.split())
+                    excerpt_words = set(normalized_excerpt.split())
+                    if len(seen_words) > 0:
+                        similarity = len(seen_words & excerpt_words) / len(seen_words | excerpt_words)
+                        if similarity > 0.8:
+                            is_duplicate = True
+                            break
+                
+                if is_duplicate:
+                    continue
+                
+                seen_excerpts.add(normalized_excerpt)
+                
+                excerpt_lower = excerpt_text.lower()
+                phrase_start = excerpt_lower.find(phrase_lower)
+                
+                if phrase_start != -1:
+                    before = excerpt_text[:phrase_start]
+                    matched = excerpt_text[phrase_start:phrase_start + len(phrase)]
+                    after = excerpt_text[phrase_start + len(phrase):]
+                    highlighted = f'{before}<font color="#DC2626"><b>{matched}</b></font>{after}'
+                else:
+                    highlighted = excerpt_text
+                
+                timestamp = None
+                if "Created Date" in row and pd.notna(row["Created Date"]):
+                    timestamp = row["Created Date"]
+                elif "Last Modified Date" in row and pd.notna(row["Last Modified Date"]):
+                    timestamp = row["Last Modified Date"]
+                
+                excerpts.append({
+                    "phrase": phrase,
+                    "excerpt": highlighted,
+                    "source": "DeepSeek-detected",
+                    "timestamp": timestamp,
+                    "message_index": msg_idx
+                })
+                break
+    
+    excerpts_sorted = sorted(
+        [e for e in excerpts if e.get('timestamp')], 
+        key=lambda x: x['timestamp'] if isinstance(x['timestamp'], pd.Timestamp) else pd.Timestamp.min
+    )
+    excerpts_sorted.extend([e for e in excerpts if not e.get('timestamp')])
+    
+    return excerpts_sorted
+
+def run_deepseek_quick_scoring(case_analysis, analysis_context, client):
+    """Stage 2A: Quick scoring pass on top 25 - analyze patterns without building full timelines"""
+    top_n = min(25, len(case_analysis))
+    top_cases = case_analysis[:top_n]
+    
+    client.stream_message("="*70 + "\n")
+    client.stream_message(f"STAGE 2A: CLAUDE SONNET QUICK SCORING\n")
+    client.stream_message(f"Scoring top {top_n} cases for prioritization\n")
+    client.stream_message("="*70 + "\n\n")
+    
+    deepseek_statistics = {
+        "total_scored": 0,
+        "api_errors": 0,
+        "analysis_time_seconds": 0,
+    }
+    
+    start_time = time.time()
+    
+    for idx, case in enumerate(top_cases, 1):
+        client.stream_message(f"[{idx}/{top_n}] Scoring Case #{case['case_number']}...\n")
+        
+        messages_for_deepseek = case['messages_full']
+        
+        quick_prompt = f"""Assess this customer support case for prioritization scoring.
+
+CASE OVERVIEW:
+Customer: {case['customer_name']}
+Support Level: {case['support_level']}
+Duration: {case['case_age_days']} days
+Messages: {case['interaction_count']}
+Claude Score: {case['claude_analysis']['frustration_score']}/10
+Severity: {case['severity']}
+
+{analysis_context}
+
+MESSAGE HISTORY (chronological):
+{messages_for_deepseek}
+
+SCORING ASSESSMENT:
+Analyze the communication patterns and provide:
+
+FRUSTRATION_FREQUENCY: [What % of messages show customer frustration? 0-100]
+RELATIONSHIP_DAMAGE_FREQUENCY: [What % of interactions damaged confidence? 0-100]
+CUSTOMER_PRIORITY: [Critical/High/Medium/Low based on relationship risk]
+JUSTIFICATION: [2-3 sentences explaining priority level]
+
+Focus on pattern recognition for scoring, not detailed message-by-message analysis."""
+
+        try:
+            response = client.evaluate_prompt(
+                prompt=quick_prompt,
+                system_message="You are analyzing customer support cases for prioritization. Focus on identifying patterns and risk levels efficiently. Maintain objective, factual language.",
+                llm_name="CLAUDE_V3_5_SONNET"
+            )
+            
+            content = response.content.strip()
+            
+            scoring = {
+                'frustration_frequency': 0,
+                'damage_frequency': 0,
+                'priority': 'Medium',
+                'justification': '',
+                'analysis_model': 'Claude 3.5 Sonnet Quick Scoring',
+                'analysis_successful': True
+            }
+            
+            for line in content.split('\n'):
+                line_stripped = line.strip()
+                if 'FRUSTRATION_FREQUENCY:' in line_stripped:
+                    nums = [int(s) for s in line_stripped.split() if s.isdigit()]
+                    if nums:
+                        scoring['frustration_frequency'] = min(100, max(0, nums[0]))
+                elif 'RELATIONSHIP_DAMAGE_FREQUENCY:' in line_stripped:
+                    nums = [int(s) for s in line_stripped.split() if s.isdigit()]
+                    if nums:
+                        scoring['damage_frequency'] = min(100, max(0, nums[0]))
+                elif 'CUSTOMER_PRIORITY:' in line_stripped:
+                    for priority in ['Critical', 'High', 'Medium', 'Low']:
+                        if priority in line_stripped:
+                            scoring['priority'] = priority
+                            break
+                elif 'JUSTIFICATION:' in line_stripped:
+                    scoring['justification'] = line_stripped.split(':', 1)[1].strip() if ':' in line_stripped else ''
+            
+            # Calculate DeepSeek score using same formula
+            frustration_rate = scoring['frustration_frequency'] / 100
+            damage_rate = scoring['damage_frequency'] / 100
+            
+            deepseek_base = (frustration_rate * 100) + (damage_rate * 50)
+            
+            priority_bonus = {
+                'Critical': 20,
+                'High': 10,
+                'Medium': 5,
+                'Low': 0
+            }.get(scoring['priority'], 0)
+            
+            deepseek_points = deepseek_base + priority_bonus
+            
+            case['deepseek_quick_scoring'] = scoring
+            case['score_breakdown']['deepseek_quick_score'] = round(deepseek_points, 1)
+            case['score_breakdown']['deepseek_frustration_rate'] = round(frustration_rate * 100, 1)
+            case['score_breakdown']['deepseek_damage_rate'] = round(damage_rate * 100, 1)
+            case['score_breakdown']['deepseek_priority_bonus'] = priority_bonus
+            case['criticality_score'] += deepseek_points
+            
+            deepseek_statistics["total_scored"] += 1
+            
+            client.stream_message(f"  → Priority: {scoring['priority']}, Score: +{deepseek_points:.1f}pts\n")
+            
+        except Exception as e:
+            client.stream_message(f"  ✗ Failed: {str(e)}\n")
+            case['deepseek_quick_scoring'] = {
+                'frustration_frequency': 0,
+                'damage_frequency': 0,
+                'priority': 'Medium',
+                'justification': 'Scoring failed',
+                'analysis_model': 'Claude 3.5 Sonnet (Error)',
+                'analysis_successful': False
+            }
+            deepseek_statistics["api_errors"] += 1
+        
+        if idx % 5 == 0:
+            time.sleep(0.3)
+    
+    deepseek_time = time.time() - start_time
+    deepseek_statistics["analysis_time_seconds"] = deepseek_time
+    
+    client.stream_message("\n" + "="*70 + "\n")
+    client.stream_message(f"STAGE 2A COMPLETE: {deepseek_time:.1f}s\n")
+    client.stream_message(f"  Scored: {deepseek_statistics['total_scored']} cases\n")
+    client.stream_message("="*70 + "\n\n")
+    
+    # Re-sort cases based on updated scores
+    client.stream_message("Re-ranking cases based on DeepSeek scoring...\n")
+    case_analysis.sort(key=lambda x: x["criticality_score"], reverse=True)
+    client.stream_message("✓ Cases re-ranked\n\n")
+    
+    return deepseek_statistics, deepseek_time
+
+def run_deepseek_detailed_timeline(case_analysis, analysis_context, client):
+    """Stage 2B: Build detailed timelines for top 10 cases after re-ranking"""
+    top_n = min(10, len(case_analysis))
+    top_cases = case_analysis[:top_n]
+    
+    client.stream_message("="*70 + "\n")
+    client.stream_message(f"STAGE 2B: CLAUDE SONNET DETAILED TIMELINES\n")
+    client.stream_message(f"Building detailed timelines for top {top_n} cases\n")
+    client.stream_message("="*70 + "\n\n")
+    
+    deepseek_statistics = {
+        "total_analyzed": 0,
+        "api_errors": 0,
+        "analysis_time_seconds": 0,
+    }
+    
+    start_time = time.time()
+    
+    for idx, case in enumerate(top_cases, 1):
+        client.stream_message(f"[{idx}/{top_n}] Building timeline for Case #{case['case_number']}...\n")
+        
+        case_data = case['case_data']
+        messages_for_deepseek = case['messages_full']
+        
+        # Intelligent truncation for Claude Sonnet (200K token context window)
+        # With two-stage analysis, we can use much more context for timeline generation
+        if len(messages_for_deepseek) > 300000:
+            messages_for_deepseek = messages_for_deepseek[:300000] + "\n\n[...additional messages truncated for timeline analysis...]"
+            client.stream_message(f"  ⚠ Messages truncated to 300K chars for context window\n")
+        
+        # STEP 1: Generate the chronological timeline
+        timeline_prompt = f"""Analyze this customer support case to assess relationship health and identify areas requiring attention.
+
+CASE OVERVIEW:
+Customer: {case['customer_name']}
+Support Level: {case['support_level']}
+Issue Severity: {case['severity']}
+Case Status: {case['status']}
+Case Duration: {case['case_age_days']} days
+Message Count: {case['interaction_count']} messages
+Initial Assessment: {case['claude_analysis']['frustration_score']}/10 frustration score
+
+{analysis_context}
+
+COMPLETE MESSAGE HISTORY (chronological):
+{messages_for_deepseek}
+
+ANALYSIS REQUIREMENTS:
+
+Provide a chronological assessment of this case. When multiple messages represent routine activity on the same topic, group them by date range into digestible phases (typically 5-15 messages per group). When a message represents an inflection point (tone shift, escalation, resolution, frustration spike), analyze it individually. Break the case into phases based on meaningful events - each new problem, each resolution attempt, each escalation, or each significant delay should start a new timeline entry. All messages must be represented in the timeline.
+
+IMPORTANT: If case status is "Closed", "Closed-NA", "Closed Duplicate", or "Closed-Test", provide a brief closure summary as your final timeline entry. If case status is anything else, the case is still active - suggest a recommended next action instead of a closure summary.
+
+For message groups:
+TIMELINE_ENTRY: [Messages X-Y - Date: MMM DD-DD, YYYY]
+SUMMARY: [Factual description of what occurred during this phase]
+CUSTOMER_TONE: [Observed tone across this period]
+FRUSTRATION_DETECTED: [Yes/No]
+FRUSTRATION_DETAIL: [If yes: specific language with context]
+POSITIVE_ACTION_DETECTED: [Yes/No]
+POSITIVE_ACTION_DETAIL: [If yes: specific language with context]
+SUPPORT_QUALITY: [Assessment of support responses]
+RELATIONSHIP_IMPACT: [Effect on customer confidence]
+
+For critical moments:
+TIMELINE_ENTRY: [Message X - Date: MMM DD, YYYY]
+SUMMARY: [Factual description of what occurred in this interaction]
+CUSTOMER_TONE: [Observed tone]
+FRUSTRATION_DETECTED: [Yes/No]
+FRUSTRATION_DETAIL: [If yes: specific language with context]
+POSITIVE_ACTION_DETECTED: [Yes/No]
+POSITIVE_ACTION_DETAIL: [If yes: specific language with context]
+SUPPORT_QUALITY: [Assessment of support response]
+RELATIONSHIP_IMPACT: [Effect on customer confidence]
+
+Base all statements strictly on what appears in the messages. Direct quotes must be verbatim - your interpretation belongs in summaries, not in quotes. Do not invent names, dates, or details. Maintain objective, professional language suitable for executive review."""
+
+        try:
+            # STEP 1: Generate timeline
+            timeline_response = client.evaluate_prompt(
+                prompt=timeline_prompt,
+                system_message="You are an enterprise customer experience analyst providing objective assessments of support interactions. Your role is to identify patterns, assess relationship health, and provide actionable insights based on communication analysis. Maintain a professional, analytical tone suitable for executive review.",
+                llm_name="CLAUDE_V3_5_SONNET",
+            )
+            
+            timeline_content = timeline_response.content.strip()
+            
+            client.stream_message(f"  Timeline generated, parsing entries...\n")
+            
+            # Parse timeline entries
+            lines = timeline_content.split('\n')
+            timeline_entries = []
+            current_timeline_entry = None
+            
+            for i, line in enumerate(lines):
+                line_stripped = line.strip()
+                
+                if not line_stripped:
+                    continue
+                
+                # Remove markdown formatting
+                line_cleaned = line_stripped.replace('**', '').replace('###', '').replace('##', '').replace('---', '').strip()
+                
+                if not line_cleaned:
+                    continue
+                
+                if 'TIMELINE_ENTRY:' in line_cleaned:
+                    if current_timeline_entry and current_timeline_entry.get('entry_label'):
+                        timeline_entries.append(current_timeline_entry)
+                    
+                    entry_label = line_stripped.split('TIMELINE_ENTRY:', 1)[1].strip() if ':' in line_stripped else 'Unknown'
+                    current_timeline_entry = {
+                        'entry_label': entry_label,
+                        'summary': '',
+                        'customer_tone': '',
+                        'frustration_detected': '',
+                        'frustration_detail': '',
+                        'support_quality': '',
+                        'relationship_impact': '',
+                        'message_excerpt': None
+                    }
+                    continue
+                
+                if current_timeline_entry is not None:
+                    if 'SUMMARY:' in line_stripped:
+                        current_timeline_entry['summary'] = line_stripped.split('SUMMARY:', 1)[1].strip() if ':' in line_stripped else ''
+                        continue
+                    elif 'CUSTOMER_TONE:' in line_stripped or 'CUSTOMER TONE:' in line_stripped:
+                        current_timeline_entry['customer_tone'] = line_stripped.split(':', 1)[1].strip() if ':' in line_stripped else ''
+                        continue
+                    elif 'FRUSTRATION_DETECTED:' in line_stripped or 'FRUSTRATION DETECTED:' in line_stripped:
+                        current_timeline_entry['frustration_detected'] = line_stripped.split(':', 1)[1].strip() if ':' in line_stripped else ''
+                        continue
+                    elif 'FRUSTRATION_DETAIL:' in line_stripped or 'FRUSTRATION DETAIL:' in line_stripped:
+                        current_timeline_entry['frustration_detail'] = line_stripped.split(':', 1)[1].strip() if ':' in line_stripped else ''
+                        continue
+                    elif 'POSITIVE_ACTION_DETECTED:' in line_stripped or 'POSITIVE ACTION DETECTED:' in line_stripped:
+                        current_timeline_entry['positive_action_detected'] = line_stripped.split(':', 1)[1].strip() if ':' in line_stripped else ''
+                        continue
+                    elif 'POSITIVE_ACTION_DETAIL:' in line_stripped or 'POSITIVE ACTION DETAIL:' in line_stripped:
+                        current_timeline_entry['positive_action_detail'] = line_stripped.split(':', 1)[1].strip() if ':' in line_stripped else ''
+                        continue
+                    elif 'SUPPORT_QUALITY:' in line_stripped or 'SUPPORT QUALITY:' in line_stripped:
+                        current_timeline_entry['support_quality'] = line_stripped.split(':', 1)[1].strip() if ':' in line_stripped else ''
+                        continue
+                    elif 'RELATIONSHIP_IMPACT:' in line_stripped or 'RELATIONSHIP IMPACT:' in line_stripped:
+                        current_timeline_entry['relationship_impact'] = line_stripped.split(':', 1)[1].strip() if ':' in line_stripped else ''
+                        continue
+            
+            if current_timeline_entry and current_timeline_entry.get('entry_label'):
+                timeline_entries.append(current_timeline_entry)
+            
+            client.stream_message(f"  Parsed {len(timeline_entries)} timeline entries\n")
+            
+            # Validation: Check coverage ratio
+            # For a 50-message case, we'd expect 10-20 entries (5:1 to 2.5:1 ratio)
+            # For a 10-message case, we'd expect 8-10 entries (1.25:1 to 1:1 ratio)
+            if len(timeline_entries) > 0:
+                coverage_ratio = case['interaction_count'] / len(timeline_entries)
+                if coverage_ratio > 15:  # More than 15 messages per entry on average
+                    client.stream_message(f"  ⚠ Low coverage: {coverage_ratio:.1f} msgs/entry. Some messages may be missing.\n")
+                elif coverage_ratio < 1:  # More entries than messages (shouldn't happen)
+                    client.stream_message(f"  ⚠ Over-detailed: {coverage_ratio:.1f} msgs/entry. Check for duplicate entries.\n")
+                else:
+                    client.stream_message(f"  ✓ Good coverage: {coverage_ratio:.1f} messages per timeline entry\n")
+            
+            # STEP 2: Generate executive summary based on the timeline
+            if len(timeline_entries) > 0:
+                # Create a condensed timeline summary for the AI to analyze
+                timeline_summary = "\n\n".join([
+                    f"TIMELINE_ENTRY: {entry.get('entry_label', 'Unknown')}\n"
+                    f"Summary: {entry.get('summary', 'N/A')}\n"
+                    f"Customer Tone: {entry.get('customer_tone', 'N/A')}\n"
+                    f"Frustration Detected: {entry.get('frustration_detected', 'N/A')}\n"
+                    f"Frustration Detail: {entry.get('frustration_detail', 'N/A')}\n"
+                    f"Positive Action: {entry.get('positive_action_detected', 'N/A')}\n"
+                    f"Support Quality: {entry.get('support_quality', 'N/A')}\n"
+                    f"Relationship Impact: {entry.get('relationship_impact', 'N/A')}"
+                    for entry in timeline_entries
+                ])
+                
+                # Intelligent truncation for timeline summary
+                # This prevents context overflow if there are many timeline entries
+                if len(timeline_summary) > 150000:
+                    timeline_summary = timeline_summary[:150000] + "\n\n[...additional timeline entries truncated for summary generation...]"
+                    client.stream_message(f"  ⚠ Timeline summary truncated to 150K chars for analysis\n")
+                
+                summary_prompt = f"""Based on the chronological timeline analysis of this support case, provide an executive summary.
+
+CASE CONTEXT:
+Customer: {case['customer_name']}
+Support Level: {case['support_level']}
+Issue Severity: {case['severity']}
+Case Status: {case['status']}
+Case Duration: {case['case_age_days']} days
+Total Messages: {case['interaction_count']}
+
+TIMELINE ANALYSIS:
+{timeline_summary}
+
+Provide executive summary using the exact format below. Do not use markdown formatting (no ##, **, or numbered lists). Each field should be on its own line:
+
+PAIN_POINTS: [Key customer concerns based on communication patterns - 2-3 sentences]
+SENTIMENT_TREND: [Evolution of customer sentiment throughout interaction - 1-2 sentences]
+CRITICAL_INFLECTION_POINTS: [2-3 specific moments where relationship trajectory changed]
+CUSTOMER_PRIORITY: [Urgency level based on analysis: Critical/High/Medium/Low]
+RECOMMENDED_ACTION: [If case status is "Closed", "Closed-NA", "Closed Duplicate", or "Closed-Test": Provide brief closure summary. If case status is anything else: Suggest specific next action to advance or resolve the case - 1-2 sentences]
+ROOT_CAUSE: [Primary factor contributing to current relationship state - 1-2 sentences]
+
+Base your assessment on the timeline patterns identified above."""
+                
+                client.stream_message(f"  Generating executive summary from timeline...\n")
+                
+                summary_response = client.evaluate_prompt(
+                    prompt=summary_prompt,
+                    system_message="You are an enterprise customer experience analyst providing executive insights based on timeline analysis. Identify patterns, assess relationship health, and provide actionable recommendations. Maintain professional objectivity suitable for executive review.",
+                    llm_name="CLAUDE_V3_5_SONNET",
+                )
+                
+                summary_content = summary_response.content.strip()
+            else:
+                summary_content = ""
+                client.stream_message(f"  ⚠ No timeline entries found, skipping summary\n")
+            
+            # Parse executive summary from second response
+            deepseek_analysis = {
+                "pain_points": "",
+                "sentiment_trend": "",
+                "implicit_signals": "",
+                "frustrated_phrases": [],
+                "customer_priority": "Medium",
+                "recommended_action": "",
+                "root_cause": "",
+                "critical_inflection_points": "",
+                "timeline_entries": timeline_entries,
+                "analysis_model": "Claude 3.5 Sonnet",
+                "analysis_successful": True,
+                "raw_timeline_response": timeline_content,
+                "raw_summary_response": summary_content,
+            }
+            
+            # Parse summary fields from second response
+            if summary_content:
+                lines = summary_content.split('\n')
+                current_field = None
+                field_content = []
+                
+                for i, line in enumerate(lines):
+                    line_stripped = line.strip()
+                    
+                    if not line_stripped:
+                        continue
+                    
+                    line_cleaned = line_stripped.replace('**', '').replace('###', '').replace('##', '').replace('---', '').strip()
+                    
+                    if not line_cleaned:
+                        continue
+                    
+                    # Parse summary fields
+                    if any(marker in line_cleaned.upper() for marker in ['PAIN_POINTS:', 'PAIN POINTS:', 'PAINPOINTS:']):
+                        if current_field and field_content:
+                            deepseek_analysis[current_field] = ' '.join(field_content).strip()
+                        current_field = 'pain_points'
+                        if ':' in line_cleaned:
+                            after_colon = line_cleaned.split(':', 1)[1].strip()
+                            if after_colon and len(after_colon) > 5 and after_colon.lower() not in ['none', 'n/a', '-', 'unknown']:
+                                field_content = [after_colon]
+                            else:
+                                field_content = []
+                        else:
+                            field_content = []
+                        
+                    elif 'SENTIMENT_TREND:' in line_cleaned or 'SENTIMENT TREND:' in line_cleaned:
+                        if current_field and field_content:
+                            deepseek_analysis[current_field] = ' '.join(field_content).strip()
+                        current_field = 'sentiment_trend'
+                        if ':' in line_cleaned:
+                            after_colon = line_cleaned.split(':', 1)[1].strip()
+                            field_content = [after_colon] if after_colon else []
+                        else:
+                            field_content = []
+                    
+                    elif 'CRITICAL_INFLECTION_POINTS:' in line_cleaned or 'CRITICAL INFLECTION POINTS:' in line_cleaned:
+                        if current_field and field_content:
+                            deepseek_analysis[current_field] = ' '.join(field_content).strip()
+                        current_field = 'critical_inflection_points'
+                        if ':' in line_cleaned:
+                            after_colon = line_cleaned.split(':', 1)[1].strip()
+                            field_content = [after_colon] if after_colon else []
+                        else:
+                            field_content = []
+                        
+                    elif 'CUSTOMER_PRIORITY:' in line_cleaned or 'CUSTOMER PRIORITY:' in line_cleaned:
+                        if current_field and field_content:
+                            deepseek_analysis[current_field] = ' '.join(field_content).strip()
+                        if ':' in line_cleaned:
+                            after_colon = line_cleaned.split(':', 1)[1].strip()
+                            if after_colon in ['Critical', 'High', 'Medium', 'Low']:
+                                deepseek_analysis['customer_priority'] = after_colon
+                        current_field = None
+                        field_content = []
+                        
+                    elif 'RECOMMENDED_ACTION:' in line_cleaned or 'RECOMMENDED ACTION:' in line_cleaned:
+                        if current_field and field_content:
+                            deepseek_analysis[current_field] = ' '.join(field_content).strip()
+                        current_field = 'recommended_action'
+                        if ':' in line_cleaned:
+                            after_colon = line_cleaned.split(':', 1)[1].strip()
+                            field_content = [after_colon] if after_colon else []
+                        else:
+                            field_content = []
+                        
+                    elif 'ROOT_CAUSE:' in line_cleaned or 'ROOT CAUSE:' in line_cleaned:
+                        if current_field and field_content:
+                            deepseek_analysis[current_field] = ' '.join(field_content).strip()
+                        current_field = 'root_cause'
+                        if ':' in line_cleaned:
+                            after_colon = line_cleaned.split(':', 1)[1].strip()
+                            field_content = [after_colon] if after_colon else []
+                        else:
+                            field_content = []
+                    
+                    elif current_field and line_cleaned:
+                        if line_stripped.isupper() and len(line_stripped) > 20:
+                            continue
+                        if line_stripped in ['-', '•', '*', '—']:
+                            continue
+                        if ':' in line_cleaned and any(keyword in line_cleaned.upper() for keyword in [
+                            'PAIN', 'SENTIMENT', 'CRITICAL', 'CUSTOMER', 'RECOMMENDED', 'ROOT'
+                        ]):
+                            continue
+                        cleaned_line = line_stripped.lstrip('-•*→ ')
+                        if cleaned_line and len(cleaned_line) > 3:
+                            field_content.append(cleaned_line)
+                
+                if current_field and field_content:
+                    deepseek_analysis[current_field] = ' '.join(field_content).strip()
+            
+            # Debug: Log what was actually extracted
+            client.stream_message(f"    Executive summary fields:\n")
+            client.stream_message(f"      Pain Points: {len(deepseek_analysis.get('pain_points', ''))} chars\n")
+            client.stream_message(f"      Sentiment Trend: {len(deepseek_analysis.get('sentiment_trend', ''))} chars\n")
+            client.stream_message(f"      Root Cause: {len(deepseek_analysis.get('root_cause', ''))} chars\n")
+            client.stream_message(f"      Critical Inflection: {len(deepseek_analysis.get('critical_inflection_points', ''))} chars\n")
+            client.stream_message(f"      Recommended Action: {len(deepseek_analysis.get('recommended_action', ''))} chars\n")
+            
+            # If ALL fields are empty, show warning
+            if not any([deepseek_analysis.get('pain_points'), 
+                       deepseek_analysis.get('sentiment_trend'),
+                       deepseek_analysis.get('root_cause')]):
+                client.stream_message(f"    ⚠ WARNING: Executive summary fields are empty!\n")
+                client.stream_message(f"    Summary response preview (first 500 chars):\n")
+                client.stream_message(f"    {summary_content[:500]}\n")
+            
+            # NOW: Extract message excerpts for each timeline entry
+            case_data_sorted = case_data.sort_values('Message Date')
+            messages_list = case_data_sorted["Message"].tolist()
+            
+            for entry in timeline_entries:
+                frustration_detail = entry.get('frustration_detail', '')
+                
+                # Try to extract a quote from the frustration detail
+                # Look for text in quotes
+                import re
+                quoted_text = re.findall(r'"([^"]+)"', frustration_detail)
+                if not quoted_text:
+                    quoted_text = re.findall(r"'([^']+)'", frustration_detail)
+                
+                if quoted_text and len(quoted_text[0]) > 10:
+                    frustrated_quote = quoted_text[0]
+                    quote_lower = frustrated_quote.lower()
+                    
+                    for msg in messages_list:
+                        if pd.isna(msg):
+                            continue
+                        msg_str = str(msg).strip()
+                        msg_lower = msg_str.lower()
+                        
+                        if quote_lower in msg_lower:
+                            # Found the message - extract context around the quote
+                            quote_pos = msg_lower.find(quote_lower)
+                            
+                            # Get 200 chars before and after for context
+                            start = max(0, quote_pos - 200)
+                            end = min(len(msg_str), quote_pos + len(frustrated_quote) + 200)
+                            
+                            excerpt_text = msg_str[start:end].strip()
+                            
+                            # Add ellipsis if truncated
+                            if start > 0:
+                                excerpt_text = "..." + excerpt_text
+                            if end < len(msg_str):
+                                excerpt_text = excerpt_text + "..."
+                            
+                            # FIRST: Escape all HTML in the excerpt
+                            excerpt_text = excerpt_text.replace('&', '&amp;')
+                            excerpt_text = excerpt_text.replace('<', '&lt;')
+                            excerpt_text = excerpt_text.replace('>', '&gt;')
+                            
+                            # NOW: Find and highlight the frustrated quote within the escaped excerpt
+                            # We need to search for the escaped version of the quote
+                            escaped_quote = frustrated_quote.replace('&', '&amp;')
+                            escaped_quote = escaped_quote.replace('<', '&lt;')
+                            escaped_quote = escaped_quote.replace('>', '&gt;')
+                            
+                            excerpt_lower = excerpt_text.lower()
+                            escaped_quote_lower = escaped_quote.lower()
+                            quote_start = excerpt_lower.find(escaped_quote_lower)
+                            
+                            if quote_start != -1:
+                                before = excerpt_text[:quote_start]
+                                matched = excerpt_text[quote_start:quote_start + len(escaped_quote)]
+                                after = excerpt_text[quote_start + len(escaped_quote):]
+                                
+                                # Determine color based on frustration
+                                frustration_detected = entry.get('frustration_detected', '').lower()
+                                if 'yes' in frustration_detected:
+                                    color = '#DC2626'  # Red for frustrated
+                                else:
+                                    color = '#ea580c'  # Orange for concerned
+                                
+                                highlighted = f'{before}<font color="{color}"><b>{matched}</b></font>{after}'
+                                entry['message_excerpt'] = highlighted
+                            else:
+                                # Quote not found in escaped text, just use escaped excerpt
+                                entry['message_excerpt'] = excerpt_text
+                            
+                            break  # Found the message, move to next entry
+            
+            # NOW: Extract positive excerpts (same logic as frustrated, but GREEN highlighting)
+            for entry in timeline_entries:
+                positive_detail = entry.get('positive_action_detail', '')
+                
+                # Try to extract a quote from the positive action detail
+                import re
+                quoted_text = re.findall(r'"([^"]+)"', positive_detail)
+                if not quoted_text:
+                    quoted_text = re.findall(r"'([^']+)'", positive_detail)
+                
+                if quoted_text and len(quoted_text[0]) > 10:
+                    positive_quote = quoted_text[0]
+                    quote_lower = positive_quote.lower()
+                    
+                    for msg in messages_list:
+                        if pd.isna(msg):
+                            continue
+                        msg_str = str(msg).strip()
+                        msg_lower = msg_str.lower()
+                        
+                        if quote_lower in msg_lower:
+                            # Found the message - extract context around the quote
+                            quote_pos = msg_lower.find(quote_lower)
+                            
+                            # Get 200 chars before and after for context
+                            start = max(0, quote_pos - 200)
+                            end = min(len(msg_str), quote_pos + len(positive_quote) + 200)
+                            
+                            excerpt_text = msg_str[start:end].strip()
+                            
+                            # Add ellipsis if truncated
+                            if start > 0:
+                                excerpt_text = "..." + excerpt_text
+                            if end < len(msg_str):
+                                excerpt_text = excerpt_text + "..."
+                            
+                            # FIRST: Escape all HTML in the excerpt
+                            excerpt_text = excerpt_text.replace('&', '&amp;')
+                            excerpt_text = excerpt_text.replace('<', '&lt;')
+                            excerpt_text = excerpt_text.replace('>', '&gt;')
+                            
+                            # NOW: Find and highlight the positive quote within the escaped excerpt
+                            escaped_quote = positive_quote.replace('&', '&amp;')
+                            escaped_quote = escaped_quote.replace('<', '&lt;')
+                            escaped_quote = escaped_quote.replace('>', '&gt;')
+                            
+                            excerpt_lower = excerpt_text.lower()
+                            escaped_quote_lower = escaped_quote.lower()
+                            quote_start = excerpt_lower.find(escaped_quote_lower)
+                            
+                            if quote_start != -1:
+                                before = excerpt_text[:quote_start]
+                                matched = excerpt_text[quote_start:quote_start + len(escaped_quote)]
+                                after = excerpt_text[quote_start + len(escaped_quote):]
+                                
+                                # GREEN for positive action
+                                highlighted = f'{before}<font color="#16a34a"><b>{matched}</b></font>{after}'
+                                entry['positive_excerpt'] = highlighted
+                            else:
+                                # Quote not found in escaped text, just use escaped excerpt
+                                entry['positive_excerpt'] = excerpt_text
+                            
+                            break  # Found the message, move to next entry
+            
+            # Store the completed analysis
+            excerpts = extract_frustrated_excerpts(case_data, deepseek_analysis['frustrated_phrases'])
+            deepseek_analysis['excerpts'] = excerpts
+            deepseek_analysis['total_excerpts_found'] = len(excerpts)
+            
+            case['deepseek_analysis'] = deepseek_analysis
+            deepseek_statistics["total_analyzed"] += 1
+            
+            client.stream_message(f"  → Timeline: {len(timeline_entries)} entries | Priority: {deepseek_analysis['customer_priority']}\n")
+            
+        except Exception as e:
+            client.stream_message(f"  ✗ Failed: {str(e)}\n")
+            case['deepseek_analysis'] = {
+                "pain_points": "Analysis failed",
+                "sentiment_trend": "Unknown",
+                "implicit_signals": "",
+                "frustrated_phrases": [],
+                "customer_priority": "Medium",
+                "recommended_action": "Manual review required",
+                "root_cause": "Analysis error",
+                "critical_inflection_points": "",
+                "timeline_entries": [],
+                "analysis_model": "Claude 3.5 Sonnet (Error)",
+                "analysis_successful": False,
+                "excerpts": [],
+                "total_excerpts_found": 0,
+            }
+            deepseek_statistics["api_errors"] += 1
+        
+        if idx % 5 == 0:
+            time.sleep(0.3)
+    
+    deepseek_time = time.time() - start_time
+    deepseek_statistics["analysis_time_seconds"] = deepseek_time
+    
+    client.stream_message("\n" + "="*70 + "\n")
+    client.stream_message(f"STAGE 2B COMPLETE: {deepseek_time:.1f}s\n")
+    client.stream_message(f"  Detailed timelines: {deepseek_statistics['total_analyzed']} cases\n")
+    client.stream_message("="*70 + "\n\n")
+    
+    return deepseek_statistics, deepseek_time
+
+def generate_all_charts(case_analysis, claude_statistics, issue_categories, 
+                       severity_distribution, support_level_distribution):
+    """Generate all visualization charts and return as bytes"""
+    
+    plt.style.use("default")
+    
+    def save_plot_to_bytes():
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=300, bbox_inches="tight", facecolor="white")
+        buf.seek(0)
+        return buf.getvalue()
+    
+    charts = {}
+    
+    # 1. Frustration Distribution
+    plt.figure(figsize=(10, 7))
+    labels = ['High\n(7-10)', 'Medium\n(4-6)', 'Low\n(1-3)', 'None\n(0)']
+    sizes = [
+        claude_statistics["high_frustration"],
+        claude_statistics["medium_frustration"],
+        claude_statistics["low_frustration"],
+        claude_statistics["no_frustration"],
+    ]
+    colors_pie = ['#dc2626', '#ea580c', '#fbbf24', '#10b981']
+    explode = (0.1, 0, 0, 0)
+    
+    wedges, texts, autotexts = plt.pie(
+        sizes, labels=labels, autopct='%1.1f%%',
+        colors=colors_pie, startangle=90, explode=explode,
+        textprops={'fontsize': 12}
+    )
+    
+    for autotext in autotexts:
+        autotext.set_color('white')
+        autotext.set_fontweight('bold')
+        autotext.set_fontsize(13)
+    
+    plt.title("Claude-Detected Frustration Distribution", fontsize=16, fontweight="bold", pad=20)
+    charts['frustration_distribution'] = save_plot_to_bytes()
+    plt.close()
+    
+    # 2. Issue Categories
+    plt.figure(figsize=(12, 8))
+    issue_items = sorted(list(issue_categories.items()), key=lambda x: x[1], reverse=True)[:10]
+    if issue_items:
+        # Truncate long category names to prevent rendering issues
+        categories_truncated = []
+        for cat in [item[0] for item in issue_items]:
+            if len(str(cat)) > 30:
+                categories_truncated.append(str(cat)[:27] + "...")
+            else:
+                categories_truncated.append(str(cat))
+        
+        counts = [item[1] for item in issue_items]
+        
+        bars = plt.bar(range(len(categories_truncated)), counts, color='#16a34a')
+        plt.title("Issue Categories Distribution", fontsize=14, fontweight="bold", pad=20)
+        plt.xlabel("Issue Category", fontsize=11)
+        plt.ylabel("Number of Cases", fontsize=11)
+        plt.xticks(range(len(categories_truncated)), categories_truncated, rotation=45, ha="right", fontsize=9)
+        
+        for i, bar in enumerate(bars):
+            height = bar.get_height()
+            plt.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{int(height)}', ha='center', va='bottom', fontsize=10)
+        
+        plt.tight_layout()
+    charts['issue_categories'] = save_plot_to_bytes()
+    plt.close()
+    
+    # 3. Score Breakdown (Stacked)
+    plt.figure(figsize=(14, 8))
+    top_10 = case_analysis[:10]
+    case_labels = [f"{case['case_number']}" for case in top_10]
+    
+    age = [case["score_breakdown"]["case_age"] for case in top_10]
+    engagement = [case["score_breakdown"]["customer_engagement"] for case in top_10]
+    support = [case["score_breakdown"]["support_level_priority"] for case in top_10]
+    volume = [case["score_breakdown"]["interaction_volume"] for case in top_10]
+    severity = [case["score_breakdown"]["technical_severity"] for case in top_10]
+    issue_class = [case["score_breakdown"]["issue_class"] for case in top_10]
+    resolution = [case["score_breakdown"]["resolution_outlook"] for case in top_10]
+    claude_frust = [case["score_breakdown"]["claude_frustration"] for case in top_10]
+    
+    x = np.arange(len(case_labels))
+    width = 0.6
+    
+    p1 = plt.bar(x, age, width, label='Age', color='#D3D3D3')
+    p2 = plt.bar(x, engagement, width, bottom=age, label='Engagement', color='#90EE90')
+    bottom2 = np.array(age) + np.array(engagement)
+    p3 = plt.bar(x, support, width, bottom=bottom2, label='Support Level', color='#9370DB')
+    bottom3 = bottom2 + np.array(support)
+    p4 = plt.bar(x, volume, width, bottom=bottom3, label='Message Volume', color='#4169E1')
+    bottom4 = bottom3 + np.array(volume)
+    p5 = plt.bar(x, severity, width, bottom=bottom4, label='Severity', color='#FFA500')
+    bottom5 = bottom4 + np.array(severity)
+    p6 = plt.bar(x, issue_class, width, bottom=bottom5, label='Issue Class', color='#FF6347')
+    bottom6 = bottom5 + np.array(issue_class)
+    p7 = plt.bar(x, resolution, width, bottom=bottom6, label='Resolution Outlook', color='#8B4513')
+    bottom7 = bottom6 + np.array(resolution)
+    p8 = plt.bar(x, claude_frust, width, bottom=bottom7, label='Claude Frustration (Log)', color='#DC143C')
+    
+    plt.title("Score Breakdown - Top 10 Cases (Hybrid)", fontsize=14, fontweight="bold", pad=20)
+    plt.xlabel("Case Number", fontsize=11)
+    plt.ylabel("Points Contributed", fontsize=11)
+    plt.xticks(x, case_labels)
+    plt.legend(loc='upper right')
+    plt.tight_layout()
+    charts['score_breakdown'] = save_plot_to_bytes()
+    plt.close()
+    
+    # 4. Severity Distribution
+    plt.figure(figsize=(10, 8))
+    if severity_distribution:
+        labels = list(severity_distribution.keys())
+        sizes = list(severity_distribution.values())
+        colors_sev = ['#DC143C', '#FFA500', '#4169E1', '#90EE90'][:len(labels)]
+        
+        wedges, texts, autotexts = plt.pie(
+            sizes, labels=labels, autopct='%1.0f%%',
+            colors=colors_sev, startangle=90,
+            textprops={'fontsize': 11}
+        )
+        
+        for autotext in autotexts:
+            autotext.set_color('white')
+            autotext.set_fontweight('bold')
+            autotext.set_fontsize(12)
+        
+        plt.title("Severity Distribution", fontsize=14, fontweight="bold", pad=20)
+    charts['severity_distribution'] = save_plot_to_bytes()
+    plt.close()
+    
+    # 5. Support Level Distribution
+    plt.figure(figsize=(10, 8))
+    if support_level_distribution:
+        labels = list(support_level_distribution.keys())
+        sizes = list(support_level_distribution.values())
+        colors_support = ['#FFD700', '#C0C0C0', '#CD7F32', '#808080'][:len(labels)]
+        
+        wedges, texts, autotexts = plt.pie(
+            sizes, labels=labels, autopct='%1.0f%%',
+            colors=colors_support, startangle=90,
+            textprops={'fontsize': 11}
+        )
+        
+        for autotext in autotexts:
+            autotext.set_color('white')
+            autotext.set_fontweight('bold')
+            autotext.set_fontsize(12)
+        
+        plt.title("Support Level Distribution", fontsize=14, fontweight="bold", pad=20)
+    charts['support_level_distribution'] = save_plot_to_bytes()
+    plt.close()
+    
+    # 6. Top 25 Critical Cases
+    plt.figure(figsize=(12, 10))
+    top_25 = case_analysis[:25]
+    top_25_labels = [f"{case['case_number']}" for case in top_25]
+    top_25_scores = [case["criticality_score"] for case in top_25]
+    
+    colors_bars = []
+    for case in top_25:
+        if case["severity"] == "S1":
+            colors_bars.append('#DC143C')
+        elif case["severity"] == "S2":
+            colors_bars.append('#FFA500')
+        elif case["severity"] == "S3":
+            colors_bars.append('#4169E1')
+        else:
+            colors_bars.append('#90EE90')
+    
+    y_pos = np.arange(len(top_25_labels))
+    plt.barh(y_pos, top_25_scores, color=colors_bars)
+    plt.yticks(y_pos, top_25_labels, fontsize=9)
+    plt.xlabel("Criticality Score", fontsize=11)
+    plt.title("Top 25 Critical Cases - Hybrid Scoring", fontsize=14, fontweight="bold", pad=20)
+    plt.gca().invert_yaxis()
+    
+    for i, v in enumerate(top_25_scores):
+        plt.text(v + 3, i, str(v), va='center', fontsize=9)
+    
+    plt.tight_layout()
+    charts['top_25_critical'] = save_plot_to_bytes()
+    plt.close()
+    
+    return charts
+
+def replace_tech_emails_with_names(text, tech_map):
+    """Replace tech emails with their actual names from signatures"""
+    if not text or not tech_map:
+        return text
+    
+    import re
+    
+    # Find all @ixsystems.com emails in the text
+    emails = re.findall(r'([\w\.-]+@ixsystems\.com)', text, re.IGNORECASE)
+    
+    for email in emails:
+        email_lower = email.lower()
+        if email_lower in tech_map:
+            tech_info = tech_map[email_lower]
+            # Replace with name and role
+            replacement = f"{tech_info['name']} ({tech_info['role'].split(',')[0].strip()})"
+            text = text.replace(email, replacement)
+        else:
+            # Fallback to generic if we don't have their info
+            text = text.replace(email, '[Support Tech]')
+    
+    return text
+
+def generate_pdf_report(case_analysis, claude_statistics, deepseek_statistics, 
+                        claude_time, deepseek_time, total_time, current_date, charts):
+    """Generate comprehensive PDF report with case interaction timelines"""
+    
+    # Get version information from all parts
+    code_versions = {
+        "Part 1 (Core)": f"v{PART1_VERSION} ({PART1_MODIFIED})",
+        "Part 2 (DeepSeek)": f"v{PART2_VERSION} ({PART2_MODIFIED}) - Status awareness",
+        "Part 3 (Viz/PDF)": f"v{PART3_VERSION} ({PART3_MODIFIED})",
+        "Part 4 (Main)": f"v{PART4_VERSION} ({PART4_MODIFIED})",
+    }
+    
+    pdf_buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        pdf_buffer,
+        pagesize=letter,
+        rightMargin=0.75*inch,
+        leftMargin=0.75*inch,
+        topMargin=0.75*inch,
+        bottomMargin=0.75*inch,
+    )
+    
+    styles = getSampleStyleSheet()
+    
+    # Custom styles
+    if 'ReportTitle' not in styles:
+        styles.add(ParagraphStyle(
+            name='ReportTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            leading=30,
+            textColor=HexColor("#1e40af"),
+            fontName='Helvetica-Bold',
+            alignment=TA_CENTER,
+            spaceAfter=10,
+        ))
+    
+    if 'ReportSubtitle' not in styles:
+        styles.add(ParagraphStyle(
+            name='ReportSubtitle',
+            parent=styles['Normal'],
+            fontSize=16,
+            leading=20,
+            textColor=HexColor("#1e40af"),
+            fontName='Helvetica-Bold',
+            alignment=TA_CENTER,
+            spaceAfter=30,
+        ))
+    
+    if 'SectionHeading' not in styles:
+        styles.add(ParagraphStyle(
+            name='SectionHeading',
+            parent=styles['Heading2'],
+            fontSize=16,
+            leading=20,
+            textColor=HexColor("#1e40af"),
+            fontName='Helvetica-Bold',
+            spaceAfter=12,
+            spaceBefore=20,
+        ))
+    
+    if 'SubHeading' not in styles:
+        styles.add(ParagraphStyle(
+            name='SubHeading',
+            parent=styles['Heading3'],
+            fontSize=13,
+            leading=16,
+            textColor=HexColor("#1e40af"),
+            fontName='Helvetica-Bold',
+            spaceAfter=10,
+            spaceBefore=15,
+        ))
+    
+    if 'BodyText' not in styles:
+        styles.add(ParagraphStyle(
+            name='BodyText',
+            parent=styles['Normal'],
+            fontSize=10,
+            leading=14,
+            alignment=TA_JUSTIFY,
+        ))
+    
+    story = []
+    top_25_critical = case_analysis[:25]
+    high_churn = len([c for c in case_analysis if c['claude_analysis'].get('churn_risk') == 'High'])
+    
+    # COVER PAGE
+    story.append(Spacer(1, 2*inch))
+    story.append(Paragraph("Customer Sentiment Analysis Report", styles['ReportTitle']))
+    story.append(Spacer(1, 0.2*inch))
+    story.append(Paragraph("Hybrid AI Methodology", styles['ReportSubtitle']))
+    story.append(Paragraph("Claude 3.5 Haiku + DeepSeek V3.1", styles['Normal']))
+    story.append(Spacer(1, 0.5*inch))
+    story.append(Paragraph(f"Generated: {current_date.strftime('%B %d, %Y')}", styles['Normal']))
+    story.append(Spacer(1, 0.8*inch))
+    
+    cover_data = [
+        ["Total Cases Analyzed", str(len(case_analysis))],
+        ["Claude 3.5 Haiku Analysis", f"{claude_statistics['total_analyzed']} cases in {claude_time:.1f}s"],
+        ["Claude 3.5 Sonnet Quick Scoring", f"{deepseek_statistics.get('total_scored', 0)} cases in {deepseek_statistics.get('quick_scoring_time', 0):.1f}s"],
+        ["Claude 3.5 Sonnet Detailed Timelines", f"{deepseek_statistics['total_analyzed']} cases in {deepseek_statistics.get('detailed_timeline_time', 0):.1f}s"],
+        ["Total Analysis Time", f"{total_time:.1f} seconds"],
+        ["Average Frustration", f"{claude_statistics['avg_frustration_score']:.2f}/10"],
+        ["Analysis Context", "TrueNAS enterprise storage support"],
+    ]
+    
+    cover_table = Table(cover_data, colWidths=[3.5*inch, 2.5*inch])
+    cover_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), HexColor("#f0f0f0")),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+        ('LEFTPADDING', (0, 0), (-1, -1), 10),
+    ]))
+    story.append(cover_table)
+    story.append(Spacer(1, 0.5*inch))
+    
+    # Add version information box
+    story.append(Paragraph("Code Version Information", styles['SubHeading']))
+    version_data = [[k, v] for k, v in code_versions.items()]
+    version_table = Table(version_data, colWidths=[2*inch, 4*inch])
+    version_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), HexColor("#e0e0e0")),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('LEFTPADDING', (0, 0), (-1, -1), 8),
+    ]))
+    story.append(version_table)
+    story.append(PageBreak())
+    
+    # Support Level Distribution Chart
+    story.append(Paragraph("Support Level Distribution", styles['SubHeading']))
+    support_img = Image(io.BytesIO(charts['support_level_distribution']))
+    support_img._restrictSize(5*inch, 3.5*inch)
+    story.append(support_img)
+    story.append(Spacer(1, 0.3*inch))
+    
+    support_breakdown_text = """
+    <b>Support Level Context:</b> The distribution of support levels affects case prioritization and SLA expectations.
+    Gold customers receive 24x7 support with 2-hour response for S1 issues, Silver receives 24x5 support, and Bronze 
+    receives 12x5 business hours support. Gold customers receive a +10 point priority bonus, Silver receives +5 points 
+    in the criticality scoring model.
+    """
+    story.append(Paragraph(support_breakdown_text, styles['BodyText']))
+    story.append(PageBreak())
+    
+    # EXECUTIVE SUMMARY
+    story.append(Paragraph("Executive Summary", styles['SectionHeading']))
+    story.append(Spacer(1, 0.15*inch))
+    
+    exec_text = f"""
+    <b>Hybrid Analysis Methodology:</b> This report uses a three-stage hybrid approach combining Claude 3.5 Haiku
+    for rapid analysis of all {len(case_analysis)} cases, followed by Claude 3.5 Sonnet quick scoring of the top
+    {deepseek_statistics['total_scored']} cases, and finally Claude 3.5 Sonnet deep-dive analysis of the top
+    {deepseek_statistics['total_analyzed']} critical cases with detailed interaction timelines.
+    <br/><br/>
+    <b>Context-Aware Analysis:</b> The AI models were provided with comprehensive TrueNAS context including 
+    company information, product lines (F/M/H/R-Series), severity level definitions (S1-S4), SLA response times, 
+    support tier details (Gold/Silver/Bronze), and enterprise customer expectations.
+    <br/><br/>
+    <b>Stage 1 - Claude 3.5 Haiku:</b> Analyzed all cases in {claude_time:.1f} seconds, providing frustration
+    scores (0-10), churn risk assessment, and issue categorization. Identified {claude_statistics['high_frustration']}
+    high-frustration cases.
+    <br/><br/>
+    <b>Stage 2A - Claude 3.5 Sonnet Quick Scoring:</b> Conducted pattern analysis of top {deepseek_statistics['total_scored']}
+    cases in {deepseek_statistics.get('quick_scoring_time', 0):.1f} seconds, assessing frustration frequency and relationship
+    damage rates to refine prioritization.
+    <br/><br/>
+    <b>Stage 2B - Claude 3.5 Sonnet Detailed Timelines:</b> Generated comprehensive analysis of top {deepseek_statistics['total_analyzed']}
+    cases in {deepseek_statistics.get('detailed_timeline_time', 0):.1f} seconds, creating message-by-message chronological timelines that map
+    customer emotional journey, identify frustration inflection points, and assess support response quality.
+    """
+    story.append(Paragraph(exec_text, styles['BodyText']))
+    story.append(Spacer(1, 0.2*inch))
+    
+    # Scoring Framework
+    story.append(Paragraph("Hybrid Scoring Framework:", styles['SubHeading']))
+    
+    scoring_data = [
+        ["Factor", "Weight", "Points Range", "Analysis Stage"],
+        ["Claude Frustration", "PRIMARY", "0-100 pts (log curve)", "Stage 1"],
+        ["Technical Severity", "Context", "5-35 pts", "Data"],
+        ["Message Volume", "Context", "5-30 pts (inverted)", "Data"],
+        ["Issue Class", "Impact", "5-30 pts", "Stage 1"],
+        ["Resolution Outlook", "Complexity", "0-15 pts", "Stage 1"],
+        ["Support Level", "Priority", "0-10 pts", "Data"],
+        ["Engagement", "Minimal", "0-15 pts", "Data"],
+        ["Case Age", "Minimal", "0-10 pts", "Data"],
+    ]
+    
+    scoring_table = Table(scoring_data, colWidths=[1.5*inch, 1*inch, 1.8*inch, 1.3*inch])
+    scoring_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), HexColor("#1e40af")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, HexColor("#f9fafb")]),
+    ]))
+    story.append(scoring_table)
+    story.append(Spacer(1, 0.2*inch))
+    
+    # Key Findings
+    story.append(Paragraph("Key Findings:", styles['SubHeading']))
+    
+    findings = [
+        f"<b>Context-Aware Analysis:</b> AI models provided with TrueNAS-specific context for accurate assessment.",
+        f"<b>Support Level Integration:</b> Gold customers receive +10 priority points, Silver +5 points.",
+        f"<b>Rapid Coverage:</b> Claude 3.5 Haiku analyzed {claude_statistics['total_analyzed']} cases in {claude_time:.1f}s.",
+        f"<b>Smart Prioritization:</b> Claude 3.5 Sonnet quick-scored {deepseek_statistics.get('total_scored', 0)} cases to identify top priorities.",
+        f"<b>Deep Interaction Timelines:</b> Claude 3.5 Sonnet generated message-by-message analysis for top {deepseek_statistics['total_analyzed']} cases.",
+        f"<b>Top Case:</b> Case #{top_25_critical[0]['case_number']} scores {top_25_critical[0]['criticality_score']} points with {top_25_critical[0]['claude_analysis']['frustration_score']}/10 frustration.",
+        f"<b>Churn Risk:</b> {high_churn} cases flagged as high churn risk requiring immediate attention.",
+    ]
+    
+    for finding in findings:
+        story.append(Paragraph(f"• {finding}", styles['BodyText']))
+        story.append(Spacer(1, 0.1*inch))
+    
+    story.append(PageBreak())
+    
+    # TOP 10 CASES TABLE
+    story.append(Paragraph("Top 10 Most Critical Cases", styles['SectionHeading']))
+    story.append(Spacer(1, 0.1*inch))
+    
+    chart_img = Image(io.BytesIO(charts['top_25_critical']))
+    chart_img._restrictSize(6.5*inch, 4*inch)
+    story.append(chart_img)
+    story.append(Spacer(1, 0.3*inch))
+    
+    table_data = [["Rank", "Case #", "Customer", "Score", "Frust.", "Issue", "Deep"]]
+    
+    cell_style = ParagraphStyle('CellStyle', parent=styles['Normal'], fontSize=8, leading=10, wordWrap='CJK')
+    
+    for i, case in enumerate(top_25_critical[:10]):
+        has_deep = "✓" if case.get('deepseek_analysis') else "-"
+        table_data.append([
+            str(i + 1),
+            str(case['case_number']),
+            Paragraph(case['customer_name'], cell_style),
+            str(case['criticality_score']),
+            f"{case['claude_analysis']['frustration_score']}/10",
+            case['claude_analysis'].get('issue_class', 'N/A')[:4],  # Abbreviated to fit
+            has_deep,
+        ])
+    
+    top10_table = Table(table_data, colWidths=[0.4*inch, 0.7*inch, 2.2*inch, 0.7*inch, 0.7*inch, 0.8*inch, 0.5*inch])
+    top10_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), HexColor("#1e40af")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 9),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, HexColor("#f9fafb")]),
+    ]))
+    story.append(top10_table)
+    story.append(PageBreak())
+    
+    # DETAILED CASE PROFILES WITH TIMELINES
+    story.append(Paragraph("Detailed Case Profiles - Top 10", styles['SectionHeading']))
+    story.append(Spacer(1, 0.1*inch))
+    
+    profile_intro = """
+    The following profiles provide comprehensive analysis of the 10 most critical cases, including DeepSeek V3.1's 
+    message-by-message chronological timeline showing customer emotional journey, frustration inflection points, 
+    and support response quality assessment.
+    """
+    story.append(Paragraph(profile_intro, styles['BodyText']))
+    story.append(Spacer(1, 0.2*inch))
+    
+    for i, case in enumerate(top_25_critical[:10], 1):
+        story.append(Spacer(1, 0.2*inch))
+        story.append(Paragraph(f"#{i}: Case {case['case_number']} - {case['customer_name']}", styles['SubHeading']))
+        
+        claude = case['claude_analysis']
+        deepseek = case.get('deepseek_analysis')
+        tech_map = case.get('tech_map', {})
+        
+        case_details = [
+            ["Criticality Score", str(round(case['criticality_score'], 1))],
+            ["Claude Frustration", f"{claude['frustration_score']}/10 → {case['score_breakdown']['claude_frustration']:.1f}pts"],
+            ["Issue Class", f"{claude.get('issue_class', 'Unknown')} → {case['score_breakdown']['issue_class']}pts"],
+            ["Resolution Outlook", f"{claude.get('resolution_outlook', 'Unknown')} → {case['score_breakdown']['resolution_outlook']}pts"],
+            ["Severity", case['severity']],
+            ["Support Level", case.get('support_level', 'Unknown')],
+            ["Messages", str(case['interaction_count'])],
+            ["Age", f"{case['case_age_days']} days"],
+        ]
+        
+        if deepseek:
+            case_details.append(["DeepSeek Priority", deepseek.get('customer_priority', 'N/A')])
+            if case['score_breakdown'].get('deepseek_timeline', 0) > 0:
+                ds_score = case['score_breakdown']['deepseek_timeline']
+                frust_rate = case['score_breakdown'].get('deepseek_frustration_rate', 0)
+                damage_rate = case['score_breakdown'].get('deepseek_damage_rate', 0)
+                case_details.append(["DeepSeek Timeline Bonus", f"+{ds_score:.1f}pts (Frust: {frust_rate:.0f}%, Damage: {damage_rate:.0f}%)"])
+        
+        case_table = Table(case_details, colWidths=[1.5*inch, 5*inch])
+        case_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), HexColor("#f0f0f0")),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        story.append(case_table)
+        story.append(Spacer(1, 0.15*inch))
+        
+        # DeepSeek Analysis
+        if deepseek and deepseek.get('analysis_successful'):
+            story.append(Paragraph("<b><i>Claude 3.5 Sonnet Deep Analysis:</i></b>", styles['Normal']))
+            story.append(Spacer(1, 0.1*inch))
+            
+            # Track if we have ANY content to display
+            has_content = False
+            
+            if deepseek.get('pain_points'):
+                pain_points = replace_tech_emails_with_names(deepseek['pain_points'], tech_map)
+                story.append(Paragraph(f"<b>Pain Points:</b> {pain_points}", styles['BodyText']))
+                story.append(Spacer(1, 0.08*inch))
+                has_content = True
+            
+            if deepseek.get('root_cause'):
+                root_cause = replace_tech_emails_with_names(deepseek['root_cause'], tech_map)
+                story.append(Paragraph(f"<b>Root Cause:</b> {root_cause}", styles['BodyText']))
+                story.append(Spacer(1, 0.08*inch))
+                has_content = True
+            
+            if deepseek.get('sentiment_trend'):
+                sentiment = replace_tech_emails_with_names(deepseek['sentiment_trend'], tech_map)
+                story.append(Paragraph(f"<b>Sentiment Trend:</b> {sentiment}", styles['BodyText']))
+                story.append(Spacer(1, 0.08*inch))
+                has_content = True
+            
+            if deepseek.get('critical_inflection_points'):
+                inflection = replace_tech_emails_with_names(deepseek['critical_inflection_points'], tech_map)
+                story.append(Paragraph(f"<b>Critical Inflection Points:</b> {inflection}", styles['BodyText']))
+                story.append(Spacer(1, 0.08*inch))
+                has_content = True
+            
+            if deepseek.get('recommended_action'):
+                action = replace_tech_emails_with_names(deepseek['recommended_action'], tech_map)
+                story.append(Paragraph(f"<b>Recommended Action:</b> {action}", styles['BodyText']))
+                has_content = True
+            
+            # If no executive summary content was extracted, show warning
+            if not has_content:
+                story.append(Paragraph(
+                    '<font color="#DC2626"><b>⚠ Executive Summary Extraction Failed</b></font>',
+                    styles['Normal']
+                ))
+                story.append(Spacer(1, 0.05*inch))
+                story.append(Paragraph(
+                    'Claude Sonnet analysis completed but executive summary fields could not be parsed. Check parsing logic in Part 2.',
+                    styles['BodyText']
+                ))
+                story.append(Spacer(1, 0.1*inch))
+            
+            story.append(Spacer(1, 0.2*inch))
+            
+            # CASE INTERACTION TIMELINE
+            timeline_entries = deepseek.get('timeline_entries', [])
+            timeline_count = len(timeline_entries)
+            
+            story.append(Paragraph(
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", 
+                styles['Normal']
+            ))
+            story.append(Paragraph(
+                f'<b>📅 CASE INTERACTION TIMELINE ({case["case_age_days"]} days, {case["interaction_count"]} messages)</b>', 
+                styles['SubHeading']
+            ))
+            story.append(Paragraph(
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", 
+                styles['Normal']
+            ))
+            story.append(Spacer(1, 0.15*inch))
+            
+            if timeline_count > 0:
+                for entry in timeline_entries:
+                    frustration_detected = entry.get('frustration_detected', '').lower()
+                    if 'yes' in frustration_detected:
+                        icon = '🔴'
+                        label_color = '#DC2626'
+                    elif entry.get('customer_tone', '').lower() in ['concerned', 'impatient', 'worried']:
+                        icon = '🟡'
+                        label_color = '#ea580c'
+                    else:
+                        icon = '🟢'
+                        label_color = '#1e40af'
+                    
+                    entry_label = entry.get('entry_label', 'Unknown')
+                    # Escape HTML in entry label too
+                    entry_label_escaped = entry_label.replace('&', '&amp;')
+                    entry_label_escaped = entry_label_escaped.replace('<', '&lt;')
+                    entry_label_escaped = entry_label_escaped.replace('>', '&gt;')
+                    
+                    story.append(Paragraph(
+                        f'<font color="{label_color}"><b>▼ {icon} {entry_label_escaped}</b></font>', 
+                        styles['Normal']
+                    ))
+                    story.append(Spacer(1, 0.05*inch))
+                    
+                    if entry.get('summary'):
+                        summary = entry['summary']
+                        # Replace tech emails with their actual names
+                        summary = replace_tech_emails_with_names(summary, tech_map)
+                        # Escape HTML entities
+                        summary = summary.replace('&', '&amp;')
+                        summary = summary.replace('<', '&lt;')
+                        summary = summary.replace('>', '&gt;')
+                        story.append(Paragraph(f'   <b>Summary:</b> {summary}', styles['BodyText']))
+                        story.append(Spacer(1, 0.03*inch))
+                    
+                    if entry.get('customer_tone'):
+                        customer_tone = entry['customer_tone'].replace('&', '&amp;')
+                        customer_tone = customer_tone.replace('<', '&lt;')
+                        customer_tone = customer_tone.replace('>', '&gt;')
+                        story.append(Paragraph(
+                            f'   <i>Customer Tone:</i> {customer_tone}', 
+                            styles['Normal']
+                        ))
+                        story.append(Spacer(1, 0.03*inch))
+                    
+                    # Display actual message excerpt if available (with highlighted frustration)
+                    # HTML is already escaped in Part 1, with intentional formatting tags added
+                    if entry.get('message_excerpt'):
+                        story.append(Paragraph(
+                            f'   <b>Message Excerpt:</b>', 
+                            styles['Normal']
+                        ))
+                        try:
+                            story.append(Paragraph(
+                                f'   <i>{entry["message_excerpt"]}</i>', 
+                                styles['BodyText']
+                            ))
+                        except Exception as e:
+                            # If excerpt fails to render, show error instead of crashing
+                            story.append(Paragraph(
+                                f'   <i>[Excerpt rendering failed]</i>', 
+                                styles['BodyText']
+                            ))
+                        story.append(Spacer(1, 0.05*inch))
+                    
+                    # Show AI's frustration analysis only if frustrated
+                    if 'yes' in frustration_detected and entry.get('frustration_detail'):
+                        frust_detail = entry['frustration_detail']
+                        # Replace tech emails with their actual names
+                        frust_detail = replace_tech_emails_with_names(frust_detail, tech_map)
+                        # Escape HTML entities
+                        frust_detail = frust_detail.replace('&', '&amp;')
+                        frust_detail = frust_detail.replace('<', '&lt;')
+                        frust_detail = frust_detail.replace('>', '&gt;')
+                        story.append(Paragraph(
+                            f'   <font color="#DC2626"><b>⚠ Analysis:</b> {frust_detail}</font>', 
+                            styles['BodyText']
+                        ))
+                        story.append(Spacer(1, 0.03*inch))
+                    
+                    # Display positive message excerpt if available
+                    if entry.get('positive_excerpt'):
+                        story.append(Paragraph(
+                            f'   <b>Positive Response:</b>', 
+                            styles['Normal']
+                        ))
+                        try:
+                            story.append(Paragraph(
+                                f'   <i>{entry["positive_excerpt"]}</i>', 
+                                styles['BodyText']
+                            ))
+                        except Exception as e:
+                            story.append(Paragraph(
+                                f'   <i>[Excerpt rendering failed]</i>', 
+                                styles['BodyText']
+                            ))
+                        story.append(Spacer(1, 0.05*inch))
+                    
+                    # Show AI's positive action analysis
+                    positive_action = entry.get('positive_action_detected', '').lower()
+                    if 'yes' in positive_action and entry.get('positive_action_detail'):
+                        positive_detail = entry['positive_action_detail']
+                        # Replace tech emails with their actual names
+                        positive_detail = replace_tech_emails_with_names(positive_detail, tech_map)
+                        # Escape HTML entities
+                        positive_detail = positive_detail.replace('&', '&amp;')
+                        positive_detail = positive_detail.replace('<', '&lt;')
+                        positive_detail = positive_detail.replace('>', '&gt;')
+                        story.append(Paragraph(
+                            f'   <font color="#16a34a"><b>✓ Positive Action:</b> {positive_detail}</font>', 
+                            styles['BodyText']
+                        ))
+                        story.append(Spacer(1, 0.03*inch))
+                    
+                    story.append(Spacer(1, 0.15*inch))
+                
+                story.append(Paragraph(
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", 
+                    styles['Normal']
+                ))
+                story.append(Spacer(1, 0.1*inch))
+            else:
+                story.append(Paragraph(
+                    '<font color="#DC2626"><b>⚠ Timeline Generation Failed</b></font>', 
+                    styles['Normal']
+                ))
+                story.append(Spacer(1, 0.05*inch))
+                story.append(Paragraph(
+                    f'Claude Sonnet returned 0 timeline entries for {case["interaction_count"]} messages. Check parsing logic or response format.',
+                    styles['BodyText']
+                ))
+                if deepseek.get('raw_response'):
+                    preview = deepseek['raw_response'][:400].replace('<', '&lt;').replace('>', '&gt;')
+                    story.append(Paragraph(
+                        f'<i>Response preview:</i><br/><font size="7">{preview}...</font>',
+                        styles['BodyText']
+                    ))
+                story.append(Spacer(1, 0.1*inch))
+                story.append(Paragraph(
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", 
+                    styles['Normal']
+                ))
+                story.append(Spacer(1, 0.1*inch))
+                
+        else:
+            story.append(Paragraph("<i>Claude Quick Analysis:</i>", styles['Normal']))
+            if claude.get('key_phrase'):
+                story.append(Paragraph(f"<b>Key Phrase:</b> \"{claude['key_phrase']}\"", styles['BodyText']))
+        
+        if i % 2 == 0 and i < 10:
+            story.append(PageBreak())
+    
+    story.append(PageBreak())
+    
+    # VISUALIZATIONS
+    story.append(Paragraph("Analysis Visualizations", styles['SectionHeading']))
+    story.append(Spacer(1, 0.2*inch))
+    
+    story.append(Paragraph("Frustration Distribution", styles['SubHeading']))
+    frust_img = Image(io.BytesIO(charts['frustration_distribution']))
+    frust_img._restrictSize(5*inch, 3.5*inch)
+    story.append(frust_img)
+    story.append(Spacer(1, 0.3*inch))
+    
+    story.append(Paragraph("Score Breakdown - Top 10", styles['SubHeading']))
+    score_img = Image(io.BytesIO(charts['score_breakdown']))
+    score_img._restrictSize(6.5*inch, 4*inch)
+    story.append(score_img)
+    
+    story.append(PageBreak())
+    
+    # RECOMMENDATIONS
+    story.append(Paragraph("Recommendations", styles['SectionHeading']))
+    story.append(Spacer(1, 0.15*inch))
+    
+    recommendations = [
+        ("<b>1. Prioritize High Churn Risk</b>",
+         f"{high_churn} cases flagged as high churn risk require immediate executive engagement."),
+        ("<b>2. Act on Claude Sonnet Recommendations</b>",
+         f"Top {deepseek_statistics['total_analyzed']} cases have specific action plans. Implement immediately."),
+        ("<b>3. Review Interaction Timelines</b>",
+         "Claude Sonnet timelines show where relationships deteriorated."),
+        ("<b>4. Address Root Causes</b>",
+         "Claude Sonnet identified emotional root causes - address systemic issues."),
+        ("<b>5. Monitor S1/S2 Cases</b>",
+         "Production-critical cases require aggressive monitoring."),
+    ]
+    
+    for title, desc in recommendations:
+        story.append(Spacer(1, 0.15*inch))
+        story.append(Paragraph(title, styles['Normal']))
+        story.append(Spacer(1, 0.05*inch))
+        story.append(Paragraph(desc, styles['BodyText']))
+    
+    story.append(PageBreak())
+    
+    # CONCLUSION
+    story.append(Paragraph("Conclusion", styles['SectionHeading']))
+    story.append(Spacer(1, 0.15*inch))
+    
+    conclusion = f"""
+    This three-stage analysis successfully combines rapid Claude 3.5 Haiku coverage with efficient Claude 3.5 Sonnet
+    prioritization and deep timeline insights, analyzing {len(case_analysis)} cases in {total_time:.1f} seconds. 
+    The methodology balances cost-efficiency with analytical depth, ensuring every case is evaluated while providing 
+    detailed insights where they matter most.
+    <br/><br/>
+    <b>Comprehensive Interaction Timelines:</b> For each critical case, Claude 3.5 Sonnet generated detailed 
+    chronological timelines analyzing every message for emotional signals, frustration triggers, and support 
+    response quality - providing unprecedented visibility into how customer relationships evolve.
+    """
+    story.append(Paragraph(conclusion, styles['BodyText']))
+    story.append(Spacer(1, 0.5*inch))
+    
+    footer = f"<i>Generated: {current_date.strftime('%B %d, %Y at %I:%M %p')}</i>"
+    story.append(Paragraph(footer, styles['Normal']))
+    
+    doc.build(story)
+    return pdf_buffer.getvalue()
+def customer_sentiment_analysis(excel_file, analysis_context=None):
+    """
+    Hybrid AI Customer Sentiment Analysis
+    Stage 1: Claude 3.5 Haiku analyzes ALL cases (rapid relationship health)
+    Stage 2A: Claude 3.5 Sonnet quick scoring on top 25 (pattern analysis)
+    Stage 2B: Claude 3.5 Sonnet deep analysis on top 10 (detailed timelines)
+    
+    MAIN ENTRY POINT - Abacus AI Workflow
+    """
+    
+    client = ApiClient()
+    client.stream_message("="*70 + "\n")
+    client.stream_message("HYBRID AI CUSTOMER SENTIMENT ANALYSIS\n")
+    client.stream_message("="*70 + "\n")
+    client.stream_message("Stage 1: Claude 3.5 Haiku - Rapid analysis (all cases)\n")
+    client.stream_message("Stage 2A: Claude 3.5 Sonnet - Pattern scoring (top 25)\n")
+    client.stream_message("Stage 2B: Claude 3.5 Sonnet - Deep analysis (top 10)\n")
+    client.stream_message("="*70 + "\n\n")
+    
+    if analysis_context is None:
+        analysis_context = """
+COMPANY & PRODUCT CONTEXT:
+TrueNAS is an enterprise open-source storage company serving Fortune 500 customers globally. 
+Products: TrueNAS F-Series (high-performance NVMe), M-Series (high-capacity all-flash/hybrid), 
+H-Series (versatile & power-efficient), R-Series (single controller appliance).
+Technology: ZFS file system, self-healing architecture, unified storage for virtualization and backup.
+
+SUPPORT TIER CONTEXT:
+- Gold Support: 24x7 for S1/S2, 4-hour on-site response, proactive monitoring
+- Silver Support: 24x5 for S1/S2, next business day on-site response
+- Bronze Support: 12x5 business hours, email support, next business day parts
+
+SEVERITY LEVEL DEFINITIONS:
+- S1: System not serving data OR severe performance degradation critically disrupting business operations
+  → CRITICAL: Production down, data inaccessible, business impact
+  → SLA: 2-hour response, 24x7 (Gold/Silver)
+  
+- S2: Performance degradation in production OR intermittent faults affecting operations
+  → HIGH: System functional but degraded, impacting productivity
+  → SLA: 4-hour response, 24x7 (Gold), 24x5 (Silver)
+  
+- S3: Issue or defect causing minimal business impact
+  → MEDIUM: Minor problems, workarounds available
+  → SLA: 4-hour email response during business hours
+  
+- S4: Information requests or administrative questions
+  → LOW: General inquiries, how-to questions
+  → SLA: Next business day response
+
+CUSTOMER PROFILE:
+Enterprise B2B customers with mission-critical storage needs. Customers expect:
+- Fast response for production issues (S1/S2)
+- Expert technical knowledge of ZFS, storage, and enterprise infrastructure
+- Professional communication with minimal back-and-forth
+- Clear escalation paths and regular updates
+- Hardware replacement within SLA commitments
+
+COMMON ISSUES TO RECOGNIZE:
+- Storage performance problems (IOPS, latency, throughput)
+- Data integrity concerns (scrub errors, disk failures)
+- Replication/backup issues affecting disaster recovery
+- Hardware failures (drives, controllers, power supplies)
+- Software upgrade complications
+- Network connectivity or configuration issues
+
+CHURN RISK INDICATORS:
+- Threats to switch to competitors (NetApp, Dell EMC, Pure Storage)
+- Mentions of contract renewal concerns
+- Executive escalation requests
+- Repeated issues without resolution
+- SLA violations or missed commitments
+- Loss of trust in product or support team
+"""
+    
+    client.stream_message("Using TrueNAS-specific context for AI analysis\n\n")
+    
+    start_time = time.time()
+    
+    try:
+        # STAGE 1: Load data
+        df, current_date = load_and_prepare_data(excel_file, client)
+        
+        # STAGE 2: Claude analysis
+        case_analysis, claude_statistics, issue_categories, support_level_distribution, claude_time = \
+            run_claude_analysis(df, analysis_context, client)
+        
+        # STAGE 3: Criticality scoring
+        case_analysis = calculate_criticality_scores(case_analysis, client)
+        
+        # STAGE 4A: DeepSeek quick scoring (top 25)
+        deepseek_quick_statistics, deepseek_quick_time = run_deepseek_quick_scoring(
+            case_analysis, analysis_context, client
+        )
+        
+        # STAGE 4B: DeepSeek detailed timeline (top 10)
+        deepseek_detailed_statistics, deepseek_detailed_time = run_deepseek_detailed_timeline(
+            case_analysis, analysis_context, client
+        )
+        
+        # Combine DeepSeek statistics
+        deepseek_statistics = {
+            "total_scored": deepseek_quick_statistics['total_scored'],
+            "total_analyzed": deepseek_detailed_statistics['total_analyzed'],
+            "api_errors": deepseek_quick_statistics['api_errors'] + deepseek_detailed_statistics['api_errors'],
+            "quick_scoring_time": deepseek_quick_time,
+            "detailed_timeline_time": deepseek_detailed_time,
+            "analysis_time_seconds": deepseek_quick_time + deepseek_detailed_time,
+        }
+        deepseek_time = deepseek_quick_time + deepseek_detailed_time
+        
+        total_time = time.time() - start_time
+        
+        client.stream_message("\n" + "="*70 + "\n")
+        client.stream_message(f"ANALYSIS COMPLETE: {total_time:.1f}s total\n")
+        client.stream_message(f"  Claude Haiku: {claude_statistics['total_analyzed']} cases in {claude_time:.1f}s\n")
+        client.stream_message(f"  Claude Sonnet Pattern Scoring: {deepseek_statistics['total_scored']} cases in {deepseek_quick_time:.1f}s\n")
+        client.stream_message(f"  Claude Sonnet Deep Analysis: {deepseek_statistics['total_analyzed']} cases in {deepseek_detailed_time:.1f}s\n")
+        client.stream_message(f"  Total Claude Sonnet: {deepseek_time:.1f}s\n")
+        client.stream_message("="*70 + "\n\n")
+        
+        # STAGE 5: Visualizations
+        client.stream_message("Generating visualizations...\n")
+        
+        severity_distribution = {}
+        for case in case_analysis:
+            sev = case["severity"]
+            severity_distribution[sev] = severity_distribution.get(sev, 0) + 1
+        
+        charts = generate_all_charts(
+            case_analysis, 
+            claude_statistics, 
+            issue_categories, 
+            severity_distribution,
+            support_level_distribution
+        )
+        
+        # STAGE 6: PDF report
+        client.stream_message("Generating PDF report...\n")
+        
+        pdf_bytes = generate_pdf_report(
+            case_analysis,
+            claude_statistics,
+            deepseek_statistics,
+            claude_time,
+            deepseek_time,
+            total_time,
+            current_date,
+            charts
+        )
+        
+        client.stream_message(f"✓ PDF: {len(pdf_bytes)} bytes\n")
+        
+        # STAGE 7: JSON outputs
+        client.stream_message("Preparing JSON outputs...\n\n")
+        
+        def clean_for_json(case_list):
+            cleaned = []
+            for case in case_list:
+                case_copy = case.copy()
+                case_copy.pop('case_data', None)
+                case_copy.pop('messages_full', None)
+                cleaned.append(case_copy)
+            return cleaned
+        
+        top_25_critical = case_analysis[:25]
+        
+        # Count issue classes and resolutions
+        systemic_issues = len([c for c in case_analysis if c['claude_analysis'].get('issue_class') == 'Systemic'])
+        environmental_issues = len([c for c in case_analysis if c['claude_analysis'].get('issue_class') == 'Environmental'])
+        challenging_resolutions = len([c for c in case_analysis if c['claude_analysis'].get('resolution_outlook') == 'Challenging'])
+        
+        critical_cases_analysis = {
+            "analysis_date": current_date.strftime("%Y-%m-%d"),
+            "methodology": "Hybrid: Claude 3.5 Haiku + Claude 3.5 Sonnet",
+            "total_cases_analyzed": len(case_analysis),
+            "claude_statistics": claude_statistics,
+            "deepseek_statistics": deepseek_statistics,
+            "top_critical_cases": clean_for_json(top_25_critical),
+        }
+        
+        summary_statistics = {
+            "analysis_date": current_date.strftime("%Y-%m-%d"),
+            "total_cases": len(case_analysis),
+            "critical_cases_count": len([c for c in case_analysis if c["criticality_score"] > 100]),
+            "average_criticality_score": float(np.mean([c["criticality_score"] for c in case_analysis])),
+            "severity_distribution": severity_distribution,
+            "support_level_distribution": support_level_distribution,
+            "frustration_statistics": {
+                "high_frustration_cases": claude_statistics["high_frustration"],
+                "medium_frustration_cases": claude_statistics["medium_frustration"],
+                "low_frustration_cases": claude_statistics["low_frustration"],
+                "no_frustration_cases": claude_statistics["no_frustration"],
+                "average_frustration_score": claude_statistics["avg_frustration_score"],
+            },
+            "case_age_statistics": {
+                "average_age_days": float(np.mean([c["case_age_days"] for c in case_analysis])),
+                "oldest_case_days": int(max([c["case_age_days"] for c in case_analysis])),
+                "cases_over_30_days": len([c for c in case_analysis if c["case_age_days"] > 30]),
+            },
+        }
+        
+        ai_analysis_summary = {
+            "analysis_date": current_date.strftime("%Y-%m-%d"),
+            "methodology": {
+                "stage_1": "Claude 3.5 Haiku - All cases",
+                "stage_2a": f"Claude 3.5 Sonnet Quick Scoring - Top {deepseek_statistics['total_scored']} cases",
+                "stage_2b": f"Claude 3.5 Sonnet Detailed Timelines - Top {deepseek_statistics['total_analyzed']} cases"
+            },
+            "claude_statistics": claude_statistics,
+            "deepseek_statistics": deepseek_statistics,
+            "total_analysis_time_seconds": total_time,
+            "frustration_distribution": {
+                "high": claude_statistics["high_frustration"],
+                "medium": claude_statistics["medium_frustration"],
+                "low": claude_statistics["low_frustration"],
+                "none": claude_statistics["no_frustration"],
+            },
+            "issue_class_summary": {
+                "systemic": systemic_issues,
+                "environmental": environmental_issues,
+                "component": len([c for c in case_analysis if c['claude_analysis'].get('issue_class') == 'Component']),
+                "procedural": len([c for c in case_analysis if c['claude_analysis'].get('issue_class') == 'Procedural']),
+            },
+            "resolution_outlook_summary": {
+                "challenging": challenging_resolutions,
+                "manageable": len([c for c in case_analysis if c['claude_analysis'].get('resolution_outlook') == 'Manageable']),
+                "straightforward": len([c for c in case_analysis if c['claude_analysis'].get('resolution_outlook') == 'Straightforward']),
+            },
+        }
+        
+        top_25_cases_simplified = {
+            "analysis_date": current_date.strftime("%Y-%m-%d"),
+            "methodology": "Three-Stage Analysis (Claude Haiku + Claude Sonnet Quick Scoring + Claude Sonnet Detailed Timelines)",
+            "scoring_explanation": {
+                "claude_haiku_frustration": "0-100pts with logarithmic curve - relationship health assessment",
+                "issue_class": "5-30pts based on problem type (Systemic=30, Environmental=15, Component=10, Procedural=5)",
+                "resolution_outlook": "0-15pts based on complexity (Challenging=15, Manageable=8, Straightforward=0)",
+                "other_factors": "Severity, volume, age, support level",
+                "claude_sonnet_quick_score": "Pattern analysis on top 25: (Frustration Rate × 100) + (Damage Rate × 50) + Priority Bonus",
+                "claude_sonnet_detailed": "Full timeline analysis on top 10 only"
+            },
+            "top_25_critical_cases": [
+                {
+                    "rank": i + 1,
+                    "case_number": case["case_number"],
+                    "customer_name": case["customer_name"],
+                    "final_criticality_score": round(case["criticality_score"], 1),
+                    "claude_raw_frustration": case['claude_analysis']['frustration_score'],
+                    "claude_curved_points": case['score_breakdown']['claude_frustration'],
+                    "issue_class": case['claude_analysis'].get('issue_class', 'Unknown'),
+                    "issue_class_points": case['score_breakdown']['issue_class'],
+                    "resolution_outlook": case['claude_analysis'].get('resolution_outlook', 'Unknown'),
+                    "resolution_outlook_points": case['score_breakdown']['resolution_outlook'],
+                    "deepseek_quick_score": case['score_breakdown'].get('deepseek_quick_score', 0),
+                    "deepseek_frustration_rate_pct": case['score_breakdown'].get('deepseek_frustration_rate', 0),
+                    "deepseek_damage_rate_pct": case['score_breakdown'].get('deepseek_damage_rate', 0),
+                    "deepseek_priority": case.get('deepseek_quick_scoring', {}).get('priority', 'N/A'),
+                    "support_level": case.get('support_level', 'Unknown'),
+                    "has_detailed_timeline": case.get('deepseek_analysis') is not None,
+                    "timeline_entries_count": len(case.get('deepseek_analysis', {}).get('timeline_entries', [])) if case.get('deepseek_analysis') else 0,
+                }
+                for i, case in enumerate(top_25_critical)
+            ],
+        }
+        
+        client.stream_message("✓ Complete!\n")
+        client.stream_message(f"Critical: {len([c for c in case_analysis if c['criticality_score'] > 100])}\n")
+        client.stream_message(f"Systemic issues: {systemic_issues}\n")
+        client.stream_message(f"Challenging resolutions: {challenging_resolutions}\n\n")
+        
+        return AgentResponse(
+            analysis_complete=f"Three-stage analysis complete: {len(case_analysis)} cases. Claude Haiku: {claude_time:.1f}s, Claude Sonnet Pattern: {deepseek_quick_time:.1f}s, Claude Sonnet Deep: {deepseek_detailed_time:.1f}s. High frustration: {claude_statistics['high_frustration']}, Systemic issues: {systemic_issues}, Challenging resolutions: {challenging_resolutions}.",
+            critical_cases_json=Blob(
+                json.dumps(critical_cases_analysis, indent=2).encode("utf-8"),
+                "application/json",
+                filename="critical_cases_hybrid.json",
+            ),
+            summary_stats_json=Blob(
+                json.dumps(summary_statistics, indent=2).encode("utf-8"),
+                "application/json",
+                filename="summary_statistics_hybrid.json",
+            ),
+            frustration_analysis_json=Blob(
+                json.dumps(ai_analysis_summary, indent=2).encode("utf-8"),
+                "application/json",
+                filename="ai_analysis_summary.json",
+            ),
+            top_25_cases_json=Blob(
+                json.dumps(top_25_cases_simplified, indent=2).encode("utf-8"),
+                "application/json",
+                filename="top_25_critical_cases_hybrid.json",
+            ),
+            frustration_chart=Blob(
+                charts['frustration_distribution'],
+                "image/png",
+                filename="frustration_distribution_hybrid.png",
+            ),
+            issue_categories_chart=Blob(
+                charts['issue_categories'],
+                "image/png",
+                filename="issue_categories_distribution.png",
+            ),
+            score_breakdown_chart=Blob(
+                charts['score_breakdown'],
+                "image/png",
+                filename="score_breakdown_hybrid.png",
+            ),
+            severity_distribution_chart=Blob(
+                charts['severity_distribution'],
+                "image/png",
+                filename="severity_distribution.png",
+            ),
+            support_level_distribution_chart=Blob(
+                charts['support_level_distribution'],
+                "image/png",
+                filename="support_level_distribution.png",
+            ),
+            top_25_critical_chart=Blob(
+                charts['top_25_critical'],
+                "image/png",
+                filename="top_25_critical_hybrid.png",
+            ),
+            comprehensive_report=Blob(
+                pdf_bytes,
+                "application/pdf",
+                filename="customer_sentiment_hybrid_report.pdf",
+            ),
+        )
+        
+    except Exception as e:
+        client.stream_message(f"\n✗ Error: {str(e)}\n")
+        import traceback
+        client.stream_message(traceback.format_exc())
+        
+        return AgentResponse(
+            analysis_complete=f"Analysis failed: {str(e)}",
+            critical_cases_json=None,
+            summary_stats_json=None,
+            frustration_analysis_json=None,
+            top_25_cases_json=None,
+            frustration_chart=None,
+            issue_categories_chart=None,
+            score_breakdown_chart=None,
+            severity_distribution_chart=None,
+            support_level_distribution_chart=None,
+            top_25_critical_chart=None,
+            comprehensive_report=None,
+        )
