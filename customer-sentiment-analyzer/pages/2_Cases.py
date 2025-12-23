@@ -35,12 +35,16 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     # View Mode Toggle - always visible
+    # Initialize global view mode if not set
+    if 'view_mode' not in st.session_state:
+        st.session_state['view_mode'] = 'All Cases'
+
     view_mode = st.radio(
         "View Mode",
         ["Recent Issues", "All Cases"],
-        index=1 if st.session_state.get('view_mode', 'All Cases') == 'All Cases' else 0,
+        index=0 if st.session_state['view_mode'] == 'Recent Issues' else 1,
         help="Recent Issues: Activity in last 14 days + negative sentiment",
-        key="cases_view_mode"
+        key="global_view_mode"
     )
     st.session_state['view_mode'] = view_mode
 
@@ -120,18 +124,20 @@ def main():
         filtered_cases = [c for c in filtered_cases
                         if c.get("deepseek_analysis", {}).get("timeline_entries")]
 
+    # Sort by criticality score descending (highest first)
+    filtered_cases = sorted(filtered_cases, key=lambda c: c.get("criticality_score", 0), reverse=True)
+
     st.markdown(f"<p style='color: {COLORS['text_muted']}'>{len(filtered_cases)} cases match filters</p>",
                 unsafe_allow_html=True)
 
-    # Build table data
+    # Build table data (no Rank column - table is already sorted by criticality)
     table_data = []
-    for i, case in enumerate(filtered_cases):
+    for case in filtered_cases:
         claude = case.get("claude_analysis") or {}
         quick = case.get("deepseek_quick_scoring") or {}
         deepseek = case.get("deepseek_analysis") or {}
 
         table_data.append({
-            "Rank": i + 1,
             "Case #": case.get("case_number"),
             "Customer": str(case.get("customer_name", ""))[:35],
             "Criticality": round(case.get("criticality_score", 0), 1),

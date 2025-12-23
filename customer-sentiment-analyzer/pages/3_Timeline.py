@@ -34,12 +34,16 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     # View Mode Toggle - always visible
+    # Initialize global view mode if not set
+    if 'view_mode' not in st.session_state:
+        st.session_state['view_mode'] = 'All Cases'
+
     view_mode = st.radio(
         "View Mode",
         ["Recent Issues", "All Cases"],
-        index=1 if st.session_state.get('view_mode', 'All Cases') == 'All Cases' else 0,
+        index=0 if st.session_state['view_mode'] == 'Recent Issues' else 1,
         help="Recent Issues: Activity in last 14 days + negative sentiment",
-        key="timeline_view_mode"
+        key="global_view_mode"
     )
     st.session_state['view_mode'] = view_mode
 
@@ -107,7 +111,14 @@ def main():
         st.info("No cases have timeline analysis. Timeline analysis is generated for top critical cases during Stage 2B analysis.")
         return
 
-    # Case selector
+    # Sort cases by criticality score descending (highest first)
+    cases_with_timelines = sorted(
+        cases_with_timelines,
+        key=lambda c: c.get("criticality_score", 0),
+        reverse=True
+    )
+
+    # Case selector (now sorted by criticality)
     case_options = {
         f"Case {c.get('case_number')} - {c.get('customer_name', 'Unknown')[:30]} (Score: {c.get('criticality_score', 0):.0f})": c
         for c in cases_with_timelines

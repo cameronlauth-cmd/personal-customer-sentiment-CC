@@ -33,12 +33,16 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     # View Mode Toggle - always visible
+    # Initialize global view mode if not set
+    if 'view_mode' not in st.session_state:
+        st.session_state['view_mode'] = 'All Cases'
+
     view_mode = st.radio(
         "View Mode",
         ["Recent Issues", "All Cases"],
-        index=1 if st.session_state.get('view_mode', 'All Cases') == 'All Cases' else 0,
+        index=0 if st.session_state['view_mode'] == 'Recent Issues' else 1,
         help="Recent Issues: Activity in last 14 days + negative sentiment",
-        key="overview_view_mode"
+        key="global_view_mode"
     )
     st.session_state['view_mode'] = view_mode
 

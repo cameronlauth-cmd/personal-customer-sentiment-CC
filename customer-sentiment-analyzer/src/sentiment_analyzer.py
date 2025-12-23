@@ -993,12 +993,15 @@ class SentimentAnalyzer:
                     case["deepseek_analysis"] = analysis
                     add_timeline_bonus(case, analysis)
 
-                    # Save timeline to cache
+                    # Save timeline to cache (use timeline_entries key for dashboard compatibility)
                     self.cache.set_timeline(case_num, {
                         "executive_summary": analysis.get("executive_summary", ""),
-                        "entries": analysis.get("timeline_entries", []),
-                        "pain_points": analysis.get("pain_points", []),
+                        "timeline_entries": analysis.get("timeline_entries", []),
+                        "pain_points": analysis.get("pain_points", ""),
                         "recommended_action": analysis.get("recommended_action", ""),
+                        "sentiment_trend": analysis.get("sentiment_trend", ""),
+                        "customer_priority": analysis.get("customer_priority", ""),
+                        "critical_inflection_points": analysis.get("critical_inflection_points", ""),
                     })
 
                     stats["total_analyzed"] += 1
@@ -1027,9 +1030,18 @@ class SentimentAnalyzer:
                 # Load existing timeline into case for display
                 cached = self.cache.get_cached_case(case_num)
                 if cached and cached.get("timeline"):
+                    timeline = cached["timeline"]
+                    # Map 'entries' key to 'timeline_entries' for dashboard compatibility
+                    timeline_entries = timeline.get("entries", timeline.get("timeline_entries", []))
                     case["deepseek_analysis"] = {
                         "analysis_successful": True,
-                        **cached["timeline"]
+                        "timeline_entries": timeline_entries,
+                        "executive_summary": timeline.get("executive_summary", ""),
+                        "pain_points": timeline.get("pain_points", ""),
+                        "recommended_action": timeline.get("recommended_action", ""),
+                        "sentiment_trend": timeline.get("sentiment_trend", ""),
+                        "customer_priority": timeline.get("customer_priority", ""),
+                        "critical_inflection_points": timeline.get("critical_inflection_points", ""),
                     }
 
             # Small delay to avoid rate limiting

@@ -469,6 +469,31 @@ class AnalysisCache:
             # Recalculate metrics
             metrics = self.calculate_recent_metrics(case_number)
 
+            # Build deepseek_analysis with timeline entries merged in
+            deepseek_analysis = case.get("deepseek_analysis", {}).copy() if case.get("deepseek_analysis") else {}
+
+            # If case has a timeline stored separately (from gate system), merge it into deepseek_analysis
+            timeline = case.get("timeline", {})
+            if timeline:
+                timeline_entries = timeline.get("entries", timeline.get("timeline_entries", []))
+                if timeline_entries and not deepseek_analysis.get("timeline_entries"):
+                    deepseek_analysis["timeline_entries"] = timeline_entries
+                    # Also copy over summary fields from timeline if not in deepseek_analysis
+                    if timeline.get("executive_summary") and not deepseek_analysis.get("executive_summary"):
+                        deepseek_analysis["executive_summary"] = timeline.get("executive_summary")
+                    if timeline.get("recommended_action") and not deepseek_analysis.get("recommended_action"):
+                        deepseek_analysis["recommended_action"] = timeline.get("recommended_action")
+                    if timeline.get("pain_points") and not deepseek_analysis.get("pain_points"):
+                        deepseek_analysis["pain_points"] = timeline.get("pain_points")
+                    if timeline.get("sentiment_trend") and not deepseek_analysis.get("sentiment_trend"):
+                        deepseek_analysis["sentiment_trend"] = timeline.get("sentiment_trend")
+                    if timeline.get("customer_priority") and not deepseek_analysis.get("customer_priority"):
+                        deepseek_analysis["customer_priority"] = timeline.get("customer_priority")
+                    if timeline.get("critical_inflection_points") and not deepseek_analysis.get("critical_inflection_points"):
+                        deepseek_analysis["critical_inflection_points"] = timeline.get("critical_inflection_points")
+                    # Mark as successful if it has entries
+                    deepseek_analysis["analysis_successful"] = True
+
             # Build dashboard-compatible structure
             export_case = {
                 "case_number": case_number,
@@ -476,8 +501,14 @@ class AnalysisCache:
                 "severity": case.get("severity", "S4"),
                 "support_level": case.get("support_level", "Unknown"),
                 "status": case.get("status", "Open"),
-                "interaction_count": len(case.get("messages", [])),
+                "interaction_count": case.get("interaction_count", len(case.get("messages", []))),
                 "context_summary": case.get("context_summary", ""),
+
+                # Case metadata
+                "case_age_days": case.get("case_age_days", 0),
+                "customer_engagement_ratio": case.get("customer_engagement_ratio", 0),
+                "created_date": case.get("created_date"),
+                "last_modified_date": case.get("last_modified_date"),
 
                 # Metrics for scoring
                 "recent_frustration_14d": metrics["recent_frustration"],
@@ -488,7 +519,8 @@ class AnalysisCache:
 
                 # Include original analysis if present
                 "claude_analysis": case.get("claude_analysis", {}),
-                "deepseek_analysis": case.get("deepseek_analysis", {}),
+                "deepseek_analysis": deepseek_analysis,
+                "deepseek_quick_scoring": case.get("deepseek_quick_scoring", {}),
 
                 # Gate tracking for dashboard filters
                 "gate1_passed": case.get("gate1_passed", False),
@@ -758,7 +790,7 @@ class AnalysisCache:
 
         Args:
             case_number: The case number
-            timeline: Timeline data (executive_summary, entries, etc.)
+            timeline: Timeline data (executive_summary, timeline_entries, etc.)
         """
         case_number = str(case_number)
         case = self.get_cached_case(case_number)
@@ -766,11 +798,11 @@ class AnalysisCache:
         if not case:
             return
 
-        # Find the last entry date from timeline entries
+        # Find the last entry date from timeline entries (check both key names for compatibility)
         last_entry_date = None
-        entries = timeline.get("entries", timeline.get("timeline_entries", []))
+        entries = timeline.get("timeline_entries", timeline.get("entries", []))
         for entry in entries:
-            entry_date = entry.get("date")
+            entry_date = entry.get("date") or entry.get("entry_label", "")
             if entry_date:
                 try:
                     date = pd.to_datetime(entry_date)
@@ -779,8 +811,13 @@ class AnalysisCache:
                 except:
                     pass
 
+        # Normalize to use timeline_entries key for consistency
+        normalized_timeline = {**timeline}
+        if "entries" in normalized_timeline and "timeline_entries" not in normalized_timeline:
+            normalized_timeline["timeline_entries"] = normalized_timeline.pop("entries")
+
         case["timeline"] = {
-            **timeline,
+            **normalized_timeline,
             "created_date": datetime.now().isoformat(),
             "last_updated": datetime.now().isoformat(),
             "last_entry_date": last_entry_date
@@ -802,7 +839,8 @@ class AnalysisCache:
             return
 
         timeline = case["timeline"]
-        existing_entries = timeline.get("entries", timeline.get("timeline_entries", []))
+        # Use timeline_entries key for consistency (check both for compatibility)
+        existing_entries = timeline.get("timeline_entries", timeline.get("entries", []))
 
         # Append new entries
         existing_entries.extend(new_entries)
@@ -810,8 +848,10 @@ class AnalysisCache:
         # Sort by date
         existing_entries.sort(key=lambda x: x.get("date", ""), reverse=False)
 
-        # Update timeline
-        timeline["entries"] = existing_entries
+        # Update timeline (use timeline_entries key for consistency)
+        timeline["timeline_entries"] = existing_entries
+        if "entries" in timeline:
+            del timeline["entries"]  # Remove old key if present
         timeline["last_updated"] = datetime.now().isoformat()
 
         # Update last entry date
