@@ -1,116 +1,43 @@
 """
 Dashboard filtering utilities for view mode switching.
 
+ARCHITECTURE: This is the DISPLAY LAYER - pure UI filtering only.
+Scoring decisions (gates, frustration, criticality) are made in the ANALYSIS LAYER.
+
 Provides functions to filter cases between:
-- Recent Issues: Cases with recent activity AND negative sentiment (triage view)
+- Recent Issues: Cases with activity in last 14 days (triage view)
 - All Cases: Complete portfolio (strategic review)
 
-Supports both three-gate architecture (gate1_passed, gate2_passed) and
-legacy mode (frustration-based filtering).
+Key principle: Filter decides IF a case shows, not WHAT data shows.
+If a case passes the filter, ALL its data is displayed (full history).
 """
 
 from typing import List, Dict
-from datetime import datetime, timedelta
-from config.settings import RECENT_WINDOW_DAYS, FRUSTRATION_HIGH
-
-
-def _is_within_window(date_str: str, window_days: int = RECENT_WINDOW_DAYS) -> bool:
-    """Check if a date string is within the specified window of days.
-
-    Args:
-        date_str: ISO format date string
-        window_days: Number of days for the window
-
-    Returns:
-        True if date is within window
-    """
-    if not date_str:
-        return False
-
-    try:
-        date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-        if date.tzinfo:
-            date = date.replace(tzinfo=None)
-        cutoff = datetime.now() - timedelta(days=window_days)
-        return date >= cutoff
-    except (ValueError, TypeError):
-        return False
+from config.settings import RECENT_WINDOW_DAYS
 
 
 def filter_recent_issues(cases: List[Dict]) -> List[Dict]:
     """
-    Filter to cases with recent activity AND negative sentiment.
+    Filter to cases with recent activity (last 14 days).
 
-    Uses three-gate architecture when available:
-    - Cases with gate2_passed AND recent activity (timeline-tracked cases)
-    - Cases with gate1_passed recently (newly escalating cases)
+    This is a pure DISPLAY filter - it only checks recency.
+    Scoring/analysis decisions are made in the analysis layer.
 
-    Falls back to legacy filtering for cases without gate fields:
-    - Recent activity (message within 14 days) + high frustration (≥7)
-    - Negative sentiment trend keywords detected
-    - Declining trend + high recent frustration
+    If a case passes this filter, ALL its data is shown (not truncated).
 
     Args:
         cases: List of case dictionaries from analysis results
 
     Returns:
-        Filtered list of cases needing attention
+        Filtered list of cases with recent activity
     """
     recent_issues = []
 
     for case in cases:
-        # Check for gate-based filtering (three-gate architecture)
-        gate1_passed = case.get("gate1_passed", False)
-        gate2_passed = case.get("gate2_passed", False)
-        gate1_passed_date = case.get("gate1_passed_date")
+        days_since = case.get("days_since_last_message")
 
-        # Days since last message (from cache), fallback to case age if not available
-        days_since_activity = case.get("days_since_last_message")
-        if days_since_activity is None:
-            days_since_activity = case.get("case_age_days", 0)
-
-        has_recent_activity = days_since_activity is not None and days_since_activity <= RECENT_WINDOW_DAYS
-
-        # GATE-BASED CONDITIONS (when gate fields are present)
-        if gate1_passed or gate2_passed:
-            # Condition A: Gate 2 passed (detailed analysis) + recent activity
-            gate2_with_activity = gate2_passed and has_recent_activity
-
-            # Condition B: Gate 1 passed recently (newly escalating)
-            gate1_recent = gate1_passed and _is_within_window(gate1_passed_date)
-
-            if gate2_with_activity or gate1_recent:
-                recent_issues.append(case)
-                continue
-
-        # LEGACY FALLBACK CONDITIONS (for cases without gate tracking)
-        claude = case.get("claude_analysis") or {}
-        deepseek = case.get("deepseek_analysis") or {}
-
-        # Extract metrics
-        frustration = claude.get("frustration_score", 0)
-        sentiment = (deepseek.get("sentiment_trend", "") or "").lower()
-        recent_frust = case.get("recent_frustration_14d", 0)
-        trend = case.get("trend", "stable")
-
-        # Condition 1: Recent activity with high frustration
-        recent_high_frustration = (
-            has_recent_activity and
-            frustration >= FRUSTRATION_HIGH
-        )
-
-        # Condition 2: Negative sentiment trend detected
-        negative_keywords = ["negative", "worsening", "declining", "deteriorat"]
-        has_negative_sentiment = any(word in sentiment for word in negative_keywords)
-
-        # Condition 3: Declining trend with high recent frustration
-        declining_with_frustration = (
-            trend == "declining" and
-            recent_frust >= FRUSTRATION_HIGH
-        )
-
-        # Include if any condition is met
-        if recent_high_frustration or has_negative_sentiment or declining_with_frustration:
+        # Simple recency check - no scoring logic here
+        if days_since is not None and days_since <= RECENT_WINDOW_DAYS:
             recent_issues.append(case)
 
     return recent_issues
@@ -152,7 +79,84 @@ def get_view_mode_indicator_html(view_mode: str, case_count: int, colors: dict) 
                 border-left: 3px solid {colors.get('warning', '#ffc107')}; margin-bottom: 1rem;">
         <span style="color: {colors.get('warning', '#ffc107')};">&#9888; Showing Recent Issues Only</span>
         <span style="color: {colors.get('text_muted', '#8b949e')}; font-size: 0.85rem; margin-left: 0.5rem;">
-            ({case_count} cases with activity in last {RECENT_WINDOW_DAYS} days + negative sentiment)
+            ({case_count} cases with activity in last {RECENT_WINDOW_DAYS} days)
         </span>
     </div>
     """
+
+
+def diagnose_filter(cases: List[Dict]) -> List[Dict]:
+    """
+    Return diagnostic info for each case explaining filter decisions.
+
+    Use in sidebar or debug page to understand filtering without re-analysis.
+
+    Args:
+        cases: List of case dictionaries
+
+    Returns:
+        List of diagnostic dicts with case_number, status, reason, and days_since_last_message
+    """
+    diagnostics = []
+    for case in cases:
+        case_num = case.get("case_number")
+        days_since = case.get("days_since_last_message")
+
+        # Simple recency-based decision (matches filter_recent_issues logic)
+        if days_since is None:
+            status = "EXCLUDED"
+            reason = "No message date data available"
+        elif days_since <= RECENT_WINDOW_DAYS:
+            status = "INCLUDED"
+            reason = f"Last message {days_since} days ago (within {RECENT_WINDOW_DAYS}d window)"
+        else:
+            status = "EXCLUDED"
+            reason = f"Last message {days_since} days ago (outside {RECENT_WINDOW_DAYS}d window)"
+
+        diagnostics.append({
+            "case_number": case_num,
+            "status": status,
+            "reason": reason,
+            "days_since_last_message": days_since
+        })
+    return diagnostics
+
+
+def validate_cases_for_filtering(cases: List[Dict]) -> Dict:
+    """
+    Validate case data quality for filtering.
+
+    Returns dict with issues found - useful for debugging data problems.
+
+    Args:
+        cases: List of case dictionaries
+
+    Returns:
+        Dictionary with validation issues
+    """
+    issues = {
+        "missing_days_since_last_message": [],
+        "suspicious_age_mismatch": [],
+        "missing_frustration": [],
+        "total_cases": len(cases)
+    }
+
+    for case in cases:
+        case_num = case.get("case_number")
+        days_since = case.get("days_since_last_message")
+        case_age = case.get("case_age_days", 0)
+
+        if days_since is None:
+            issues["missing_days_since_last_message"].append(case_num)
+        elif case_age > 0 and days_since > case_age + 7:
+            # Last message older than case creation? Suspicious data
+            issues["suspicious_age_mismatch"].append({
+                "case": case_num,
+                "days_since_msg": days_since,
+                "case_age": case_age
+            })
+
+        if not case.get("claude_analysis"):
+            issues["missing_frustration"].append(case_num)
+
+    return issues

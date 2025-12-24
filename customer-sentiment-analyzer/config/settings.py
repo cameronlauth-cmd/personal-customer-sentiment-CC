@@ -21,7 +21,7 @@ TOP_DETAILED = 10     # Cases for Stage 2B detailed timeline
 
 # Three-Gate Architecture Thresholds
 GATE1_AVG_THRESHOLD = 3           # Avg frustration to trigger Gate 2 (Sonnet quick)
-GATE1_PEAK_THRESHOLD = 6          # Peak frustration to trigger Gate 2 (Sonnet quick)
+GATE1_PEAK_THRESHOLD = 5          # Peak frustration to trigger Gate 2 (Sonnet quick)
 GATE2_CRITICALITY_THRESHOLD = 150 # Criticality score to trigger Gate 3 (timeline)
 
 # Message Limits for API Calls
@@ -43,6 +43,32 @@ CLOSED_STATUSES = [
     "Closed-Test",
     "Closed-NA"
 ]
+
+
+def normalize_case_number(case_number) -> str:
+    """
+    Normalize case number to consistent string format.
+
+    - Strips leading zeros
+    - Handles int, float, and string inputs
+    - Returns string for consistent dictionary keys
+
+    Examples:
+        normalize_case_number("00090406") -> "90406"
+        normalize_case_number(90406) -> "90406"
+        normalize_case_number(90406.0) -> "90406"
+        normalize_case_number("  00090406  ") -> "90406"
+    """
+    if case_number is None:
+        return ""
+    # Convert to string, strip whitespace
+    case_str = str(case_number).strip()
+    # Remove any decimal part (e.g., "90406.0" from pandas)
+    if '.' in case_str:
+        case_str = case_str.split('.')[0]
+    # Strip leading zeros, but keep at least one digit
+    return case_str.lstrip('0') or '0'
+
 
 # Scoring Weights
 SEVERITY_WEIGHTS = {

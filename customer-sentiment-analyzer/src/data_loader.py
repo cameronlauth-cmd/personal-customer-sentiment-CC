@@ -11,7 +11,7 @@ import pandas as pd
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config.settings import COLUMN_MAPPINGS, REQUIRED_COLUMNS, OPTIONAL_COLUMNS
+from config.settings import COLUMN_MAPPINGS, REQUIRED_COLUMNS, OPTIONAL_COLUMNS, normalize_case_number
 
 
 class DataLoader:
@@ -270,21 +270,29 @@ class DataLoader:
             df: DataFrame with case data
 
         Returns:
-            List of unique case numbers
+            List of unique case numbers (normalized)
         """
-        return df["Case Number"].unique().tolist()
+        # Normalize all case numbers and deduplicate
+        raw_cases = df["Case Number"].unique().tolist()
+        normalized = list(set(normalize_case_number(cn) for cn in raw_cases))
+        return normalized
 
-    def get_case_data(self, df: pd.DataFrame, case_number: int) -> Dict:
+    def get_case_data(self, df: pd.DataFrame, case_number) -> Dict:
         """Get all data for a specific case.
 
         Args:
             df: Full DataFrame
-            case_number: Case number to extract
+            case_number: Case number to extract (will be normalized)
 
         Returns:
             Dictionary with case data
         """
-        case_df = df[df["Case Number"] == case_number].copy()
+        # Normalize the target case number
+        target_normalized = normalize_case_number(case_number)
+
+        # Filter for rows where normalized case number matches
+        # This handles cases where Excel has "00090406" but we're looking for "90406"
+        case_df = df[df["Case Number"].apply(normalize_case_number) == target_normalized].copy()
 
         if case_df.empty:
             return {}
@@ -309,7 +317,7 @@ class DataLoader:
         engagement_ratio = 0.6 if interaction_count > 2 else 0.3
 
         return {
-            "case_number": int(case_number),
+            "case_number": normalize_case_number(case_number),
             "customer_name": str(first_row["Customer Name"]),
             "severity": first_row["Severity"],
             "support_level": first_row["Support Level"],

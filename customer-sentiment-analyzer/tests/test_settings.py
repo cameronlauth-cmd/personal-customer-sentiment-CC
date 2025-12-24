@@ -10,7 +10,7 @@ import os
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config.settings import get_volume_points, get_age_points, get_engagement_points
+from config.settings import get_volume_points, get_age_points, get_engagement_points, normalize_case_number
 
 
 class TestGetVolumePoints:
@@ -88,3 +88,43 @@ class TestGetEngagementPoints:
         """Engagement < 0.3 should return 0 points."""
         assert get_engagement_points(0.0) == 0
         assert get_engagement_points(0.29) == 0
+
+
+class TestNormalizeCaseNumber:
+    """Tests for case number normalization function."""
+
+    def test_strips_leading_zeros_from_string(self):
+        """Leading zeros should be stripped from string case numbers."""
+        assert normalize_case_number("00090406") == "90406"
+        assert normalize_case_number("00088784") == "88784"
+        assert normalize_case_number("000123") == "123"
+
+    def test_handles_integer_input(self):
+        """Integer case numbers should be converted to string."""
+        assert normalize_case_number(90406) == "90406"
+        assert normalize_case_number(123) == "123"
+
+    def test_handles_float_from_pandas(self):
+        """Float values (common from pandas) should work correctly."""
+        assert normalize_case_number(90406.0) == "90406"
+        assert normalize_case_number(123.0) == "123"
+
+    def test_preserves_single_zero(self):
+        """Case number '0' should not become empty string."""
+        assert normalize_case_number("0") == "0"
+        assert normalize_case_number(0) == "0"
+        assert normalize_case_number("000") == "0"
+
+    def test_handles_none(self):
+        """None should return empty string."""
+        assert normalize_case_number(None) == ""
+
+    def test_handles_whitespace(self):
+        """Whitespace should be stripped."""
+        assert normalize_case_number("  00090406  ") == "90406"
+        assert normalize_case_number("  90406") == "90406"
+
+    def test_already_normalized_unchanged(self):
+        """Already normalized case numbers should remain unchanged."""
+        assert normalize_case_number("90406") == "90406"
+        assert normalize_case_number("12345") == "12345"

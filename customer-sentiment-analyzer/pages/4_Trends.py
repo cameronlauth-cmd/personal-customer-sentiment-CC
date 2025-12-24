@@ -36,19 +36,21 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    # View Mode Toggle - always visible
-    # Initialize global view mode if not set
+    # View Mode Toggle - synced across all pages via session state
     if 'view_mode' not in st.session_state:
         st.session_state['view_mode'] = 'All Cases'
 
-    view_mode = st.radio(
+    def on_view_mode_change():
+        st.session_state['view_mode'] = st.session_state['view_mode_trends']
+
+    st.radio(
         "View Mode",
         ["Recent Issues", "All Cases"],
         index=0 if st.session_state['view_mode'] == 'Recent Issues' else 1,
         help="Recent Issues: Activity in last 14 days + negative sentiment",
-        key="global_view_mode"
+        key="view_mode_trends",
+        on_change=on_view_mode_change
     )
-    st.session_state['view_mode'] = view_mode
 
 
 def create_top_cases_chart(cases: list, top_n: int = 10) -> go.Figure:

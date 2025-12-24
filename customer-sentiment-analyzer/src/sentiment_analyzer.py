@@ -19,7 +19,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.settings import (
     TOP_QUICK_SCORE, TOP_DETAILED, TRUENAS_CONTEXT,
-    GATE1_AVG_THRESHOLD, GATE1_PEAK_THRESHOLD, GATE2_CRITICALITY_THRESHOLD
+    GATE1_AVG_THRESHOLD, GATE1_PEAK_THRESHOLD, GATE2_CRITICALITY_THRESHOLD,
+    normalize_case_number
 )
 from .claude_client import ClaudeClient
 from .data_loader import DataLoader
@@ -139,6 +140,27 @@ class SentimentAnalyzer:
         self._update_progress("Calculating criticality scores...", 0.50)
         cases = [calculate_criticality_score(c) for c in cases]
         cases = rank_cases(cases)
+
+        # Sync gate flags in cache for ALL cases based on calculated values
+        # This ensures cached cases (no new messages) still get properly flagged
+        for case in cases:
+            case_num = case.get("case_number")
+            claude_analysis = case.get("claude_analysis", {})
+            frustration = claude_analysis.get("frustration_score", 0)
+            criticality = case.get("criticality_score", 0)
+
+            cached = self.cache.get_cached_case(case_num)
+            if cached:
+                # Set Gate 1 if frustration qualifies (avg >= 3 OR peak >= 5)
+                if not cached.get("gate1_passed"):
+                    avg = cached.get("avg_frustration", frustration)
+                    peak = cached.get("peak_frustration", frustration)
+                    if avg >= GATE1_AVG_THRESHOLD or peak >= GATE1_PEAK_THRESHOLD:
+                        cached["gate1_passed"] = True
+                        cached["gate1_passed_date"] = datetime.now().isoformat()
+
+                # Update criticality score in cache
+                cached["criticality_score"] = criticality
 
         # GATE 2: Sonnet quick analysis for cases that passed Gate 1
         gate2_candidates = self.cache.get_cases_for_gate2()
@@ -894,8 +916,8 @@ class SentimentAnalyzer:
 
         start_time = time.time()
 
-        # Build lookup from cases list (normalize case numbers - strip leading zeros)
-        case_lookup = {str(c["case_number"]).lstrip("0"): c for c in cases}
+        # Build lookup from cases list (normalize case numbers)
+        case_lookup = {normalize_case_number(c["case_number"]): c for c in cases}
 
         for idx, (case_num, cached_case) in enumerate(gate2_candidates, 1):
             progress = 0.55 + (0.15 * idx / total) if total > 0 else 0.55
@@ -905,7 +927,7 @@ class SentimentAnalyzer:
             )
 
             # Find the case in our cases list (normalize case number)
-            case = case_lookup.get(str(case_num).lstrip("0"))
+            case = case_lookup.get(normalize_case_number(case_num))
             if not case:
                 continue
 
@@ -963,8 +985,8 @@ class SentimentAnalyzer:
 
         start_time = time.time()
 
-        # Build lookup from cases list (normalize case numbers - strip leading zeros)
-        case_lookup = {str(c["case_number"]).lstrip("0"): c for c in cases}
+        # Build lookup from cases list (normalize case numbers)
+        case_lookup = {normalize_case_number(c["case_number"]): c for c in cases}
 
         for idx, (case_num, cached_case) in enumerate(gate3_candidates, 1):
             progress = 0.70 + (0.25 * idx / total) if total > 0 else 0.70
@@ -974,7 +996,7 @@ class SentimentAnalyzer:
             )
 
             # Find the case in our cases list (normalize case number)
-            case = case_lookup.get(str(case_num).lstrip("0"))
+            case = case_lookup.get(normalize_case_number(case_num))
             if not case:
                 continue
 

@@ -14,7 +14,8 @@ from config.settings import (
     GATE1_AVG_THRESHOLD,
     GATE1_PEAK_THRESHOLD,
     GATE2_CRITICALITY_THRESHOLD,
-    RECENT_WINDOW_DAYS
+    RECENT_WINDOW_DAYS,
+    normalize_case_number
 )
 
 
@@ -40,11 +41,50 @@ class AnalysisCache:
         if os.path.exists(self.cache_file):
             try:
                 with open(self.cache_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    cache = json.load(f)
+                # Run migration to normalize case number keys
+                cache = self._migrate_case_numbers(cache)
+                return cache
             except (json.JSONDecodeError, IOError) as e:
                 print(f"Warning: Could not load cache file: {e}")
                 return self._empty_cache()
         return self._empty_cache()
+
+    def _migrate_case_numbers(self, cache: Dict) -> Dict:
+        """
+        Migrate existing cache to use normalized case number keys.
+
+        Handles duplicates by keeping the most recently updated entry.
+        """
+        old_cases = cache.get("cases", {})
+        if not old_cases:
+            return cache
+
+        new_cases = {}
+        migrated = 0
+
+        for old_key, case_data in old_cases.items():
+            new_key = normalize_case_number(old_key)
+
+            if new_key != old_key:
+                migrated += 1
+
+            # Handle potential duplicates (merge if exists)
+            if new_key in new_cases:
+                # Keep the more recently updated one
+                existing = new_cases[new_key]
+                existing_updated = existing.get("last_updated", "")
+                case_updated = case_data.get("last_updated", "")
+                if case_updated > existing_updated:
+                    new_cases[new_key] = case_data
+            else:
+                new_cases[new_key] = case_data
+
+        if migrated > 0:
+            print(f"Migrated {migrated} case number keys to normalized format")
+
+        cache["cases"] = new_cases
+        return cache
 
     def _empty_cache(self) -> Dict:
         """Return empty cache structure."""
@@ -89,7 +129,7 @@ class AnalysisCache:
         Returns:
             Cached case data or None if not found
         """
-        return self.cache.get("cases", {}).get(str(case_number))
+        return self.cache.get("cases", {}).get(normalize_case_number(case_number))
 
     def get_all_cases(self, include_closed: bool = False) -> Dict[str, Dict]:
         """Get all cached cases.
@@ -177,7 +217,7 @@ class AnalysisCache:
             case_number: The case number
             case_data: Full case data to store
         """
-        case_number = str(case_number)
+        case_number = normalize_case_number(case_number)
         existing = self.get_cached_case(case_number)
 
         if existing:
@@ -221,7 +261,7 @@ class AnalysisCache:
             case_number: The case number
             message_data: Message analysis data with date, frustration, summary, etc.
         """
-        case_number = str(case_number)
+        case_number = normalize_case_number(case_number)
         case = self.get_cached_case(case_number)
 
         if not case:
@@ -426,7 +466,7 @@ class AnalysisCache:
         Returns:
             True if case was removed
         """
-        case_number = str(case_number)
+        case_number = normalize_case_number(case_number)
         if case_number in self.cache.get("cases", {}):
             del self.cache["cases"][case_number]
             return True
@@ -559,7 +599,7 @@ class AnalysisCache:
         Returns:
             True if Gate 1 threshold crossed (needs Gate 2 analysis)
         """
-        case_number = str(case_number)
+        case_number = normalize_case_number(case_number)
         case = self.get_cached_case(case_number)
 
         if not case:
@@ -648,11 +688,32 @@ class AnalysisCache:
             case_number: The case number
             case_data: Full case dict with all analysis results
         """
-        case_number = str(case_number)
+        case_number = normalize_case_number(case_number)
         case = self.get_cached_case(case_number)
 
         if not case:
-            return
+            # Create new cache entry if case doesn't exist
+            # This can happen when all messages are "cached" but case wasn't in cache
+            case = {
+                "first_seen": datetime.now().isoformat(),
+                "last_updated": datetime.now().isoformat(),
+                "status": case_data.get("status", "Open"),
+                "messages": [],
+                "avg_frustration": 0,
+                "peak_frustration": 0,
+                "gate1_passed": False,
+                "gate1_passed_date": None,
+                "gate2_passed": False,
+                "criticality_score": 0,
+                "sonnet_analysis": None,
+                "has_timeline": False,
+                "timeline": None,
+                "claude_analysis": case_data.get("claude_analysis"),
+                "customer_name": case_data.get("customer_name"),
+                "severity": case_data.get("severity"),
+                "support_level": case_data.get("support_level"),
+            }
+            self.cache["cases"][case_number] = case
 
         # Store dashboard-needed fields
         case["case_age_days"] = case_data.get("case_age_days", 0)
@@ -662,6 +723,24 @@ class AnalysisCache:
         case["last_modified_date"] = case_data.get("last_modified_date")
         case["criticality_score"] = case_data.get("criticality_score", 0)
         case["issue_category"] = case_data.get("issue_category", "Unknown")
+
+        # Update frustration from claude_analysis if available
+        claude_analysis = case_data.get("claude_analysis", {})
+        if claude_analysis:
+            frustration = claude_analysis.get("frustration_score", 0)
+            # Update avg/peak if not already set or if this is higher
+            if frustration > case.get("avg_frustration", 0):
+                case["avg_frustration"] = frustration
+            if frustration > case.get("peak_frustration", 0):
+                case["peak_frustration"] = frustration
+
+            # Check Gate 1 eligibility if not already passed
+            if not case.get("gate1_passed"):
+                avg = case.get("avg_frustration", 0)
+                peak = case.get("peak_frustration", 0)
+                if avg >= GATE1_AVG_THRESHOLD or peak >= GATE1_PEAK_THRESHOLD:
+                    case["gate1_passed"] = True
+                    case["gate1_passed_date"] = datetime.now().isoformat()
 
         # Store deepseek analysis if available
         if case_data.get("deepseek_analysis"):
@@ -709,7 +788,7 @@ class AnalysisCache:
         Returns:
             True if Gate 2 threshold crossed (needs timeline generation)
         """
-        case_number = str(case_number)
+        case_number = normalize_case_number(case_number)
         case = self.get_cached_case(case_number)
 
         if not case:
@@ -792,7 +871,7 @@ class AnalysisCache:
             case_number: The case number
             timeline: Timeline data (executive_summary, timeline_entries, etc.)
         """
-        case_number = str(case_number)
+        case_number = normalize_case_number(case_number)
         case = self.get_cached_case(case_number)
 
         if not case:
@@ -832,7 +911,7 @@ class AnalysisCache:
             case_number: The case number
             new_entries: List of new timeline entries to append
         """
-        case_number = str(case_number)
+        case_number = normalize_case_number(case_number)
         case = self.get_cached_case(case_number)
 
         if not case or not case.get("timeline"):
@@ -876,7 +955,7 @@ class AnalysisCache:
         Returns:
             List of messages not yet in timeline
         """
-        case_number = str(case_number)
+        case_number = normalize_case_number(case_number)
         case = self.get_cached_case(case_number)
 
         if not case:
@@ -908,7 +987,7 @@ class AnalysisCache:
         Args:
             case_number: The case number
         """
-        case_number = str(case_number)
+        case_number = normalize_case_number(case_number)
         case = self.get_cached_case(case_number)
 
         if case:
@@ -921,3 +1000,39 @@ class AnalysisCache:
             case["has_timeline"] = False
             case["timeline"] = None
             case["last_updated"] = datetime.now().isoformat()
+
+    def get_cache_diagnostics(self) -> Dict:
+        """Return diagnostic info about cache state.
+
+        Useful for debugging duplicate case numbers and missing data.
+
+        Returns:
+            Dictionary with diagnostic information
+        """
+        cases = self.cache.get("cases", {})
+
+        # Check for duplicate patterns (shouldn't happen after migration)
+        normalized_keys = {}
+        duplicates = []
+        for key in cases.keys():
+            norm = normalize_case_number(key)
+            if norm in normalized_keys:
+                duplicates.append((key, normalized_keys[norm]))
+            normalized_keys[norm] = key
+
+        # Check for missing critical fields
+        missing_message_dates = []
+        missing_frustration = []
+        for case_num, case in cases.items():
+            if not case.get("messages"):
+                missing_message_dates.append(case_num)
+            if not case.get("claude_analysis"):
+                missing_frustration.append(case_num)
+
+        return {
+            "total_cases": len(cases),
+            "duplicate_case_numbers": duplicates,
+            "cases_without_messages": missing_message_dates,
+            "cases_without_analysis": missing_frustration,
+            "cache_file": self.cache_file
+        }

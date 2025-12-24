@@ -21,7 +21,7 @@ RESULTS_FILE = Path(__file__).parent / "data" / "last_analysis.json"
 
 # Import cache manager
 from src.analysis_cache import AnalysisCache
-from config.settings import CACHE_FILE, RECENT_WINDOW_DAYS, CLOSED_STATUSES
+from config.settings import CACHE_FILE, RECENT_WINDOW_DAYS, CLOSED_STATUSES, normalize_case_number
 from src.dashboard.filters import filter_recent_issues
 
 
@@ -77,15 +77,21 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-        # View Mode Toggle - always visible at top
-        view_mode = st.radio(
+        # View Mode Toggle - synced across all pages via session state
+        if 'view_mode' not in st.session_state:
+            st.session_state['view_mode'] = 'All Cases'
+
+        def on_view_mode_change():
+            st.session_state['view_mode'] = st.session_state['view_mode_app']
+
+        st.radio(
             "View Mode",
             ["Recent Issues", "All Cases"],
-            index=1 if st.session_state.get('view_mode', 'All Cases') == 'All Cases' else 0,
+            index=0 if st.session_state['view_mode'] == 'Recent Issues' else 1,
             help="Recent Issues: Activity in last 14 days + negative sentiment",
-            key="app_view_mode"
+            key="view_mode_app",
+            on_change=on_view_mode_change
         )
-        st.session_state['view_mode'] = view_mode
 
         st.divider()
 
@@ -157,6 +163,34 @@ def main():
                 if RESULTS_FILE.exists():
                     RESULTS_FILE.unlink()
                 st.rerun()
+
+            # Filter Diagnostics Panel
+            st.divider()
+            with st.expander("Filter Diagnostics"):
+                from src.dashboard.filters import diagnose_filter
+                cases = results.get('cases', [])
+                diagnostics = diagnose_filter(cases)
+
+                included = [d for d in diagnostics if d['status'] == 'INCLUDED']
+                excluded = [d for d in diagnostics if d['status'] == 'EXCLUDED']
+
+                st.write(f"**Recent Issues:** {len(included)} cases")
+                st.write(f"**Excluded:** {len(excluded)} cases")
+
+                # Show cases that might be problematic
+                no_date_data = [d for d in diagnostics if d['days_since_last_message'] is None]
+                if no_date_data:
+                    st.warning(f"{len(no_date_data)} cases missing message date data")
+                    for d in no_date_data[:3]:
+                        st.caption(f"- {d['case_number']}: {d['reason']}")
+
+                old_but_included = [d for d in diagnostics
+                                    if d['days_since_last_message'] and d['days_since_last_message'] > RECENT_WINDOW_DAYS
+                                    and d['status'] == 'INCLUDED']
+                if old_but_included:
+                    st.error(f"BUG: {len(old_but_included)} old cases incorrectly included!")
+                    for d in old_but_included[:5]:
+                        st.caption(f"- {d['case_number']}: {d['reason']}")
 
     # Main content area
     st.markdown(f"""
@@ -339,11 +373,11 @@ def main():
                     loader = DataLoader()
                     df = loader.load_excel(closed_file.getvalue())
 
-                    # Find case numbers with closed status
+                    # Find case numbers with closed status (normalize for consistent matching)
                     closed_case_numbers = []
                     for _, row in df.iterrows():
                         status = str(row.get("Status", "")).strip()
-                        case_num = str(row.get("Case Number", "")).strip()
+                        case_num = normalize_case_number(row.get("Case Number", ""))
                         if status in CLOSED_STATUSES and case_num:
                             closed_case_numbers.append(case_num)
 
