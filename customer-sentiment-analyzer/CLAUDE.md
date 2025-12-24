@@ -27,9 +27,9 @@ python -m pip install -r requirements.txt
 
 The system uses a threshold-based gate architecture for efficient API cost management:
 
-**Gate 1 - Claude Haiku (All New Messages):** Scores new messages only, updates running avg/peak frustration. Cases pass Gate 1 when: Avg frustration >= 3 OR Peak frustration >= 6.
+**Gate 1 - Claude Haiku (All New Messages):** Scores new messages only, updates running avg/peak frustration. Cases pass Gate 1 when: Avg frustration >= 3 OR Peak frustration >= 5.
 
-**Gate 2 - Claude Sonnet Quick (Gate 1 Cases):** Full criticality scoring on cases that passed Gate 1. Cases pass Gate 2 when: Criticality score >= 175. Failed Gate 2 cases have their Sonnet analysis cached for re-evaluation on next upload.
+**Gate 2 - Claude Sonnet Quick (Gate 1 Cases):** Full criticality scoring on cases that passed Gate 1. Cases pass Gate 2 when: Criticality score >= 150. Failed Gate 2 cases have their Sonnet analysis cached for re-evaluation on next upload.
 
 **Gate 3 - Claude Sonnet Timeline (Gate 2 Cases):** Deep timeline analysis with message-level chronology, ownership attribution ([CUSTOMER]/[SUPPORT]), sentiment evolution, and executive summaries. Timelines persist until case closure. New messages append to existing timelines.
 
@@ -45,7 +45,7 @@ The system uses a threshold-based gate architecture for efficient API cost manag
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    GATE 1: HAIKU SCREENING                      │
-│  PASS: Avg frustration >= 3 OR Peak frustration >= 6           │
+│  PASS: Avg frustration >= 3 OR Peak frustration >= 5           │
 └─────────────────────────────────────────────────────────────────┘
                               │
               ┌───────────────┴───────────────┐
@@ -54,7 +54,7 @@ The system uses a threshold-based gate architecture for efficient API cost manag
               ▼                               ▼
      Update scores only          ┌────────────────────────────────┐
                                  │      GATE 2: SONNET QUICK      │
-                                 │  PASS: Criticality >= 175      │
+                                 │  PASS: Criticality >= 150      │
                                  │  FAIL: Cache, re-eval next     │
                                  └────────────────────────────────┘
                                               │
@@ -77,15 +77,23 @@ When no cache is provided, the system falls back to top-N selection:
 - Stage 2A: Sonnet quick on top 25
 - Stage 2B: Sonnet timeline on top 10
 
+### Architecture Principle: Scoring vs Display Separation
+
+**Analysis Layer** (writes to cache): Gate evaluation, frustration scores, criticality calculation, timelines. All cases scored, all data stored.
+
+**Display Layer** (UI filters): Pure recency-based filtering. "All Cases" shows everything. "Recent Issues" shows `days_since_last_message <= 14`. Filter decides IF a case shows, not WHAT data shows—if case passes filter, show ALL its messages/history.
+
 ### Key Components
 
 | File | Purpose |
 |------|---------|
 | `app.py` | Streamlit entry point, file upload, result persistence |
-| `src/sentiment_analyzer.py` | Pipeline orchestrator for 3-stage analysis |
+| `src/sentiment_analyzer.py` | Pipeline orchestrator for 3-gate analysis |
+| `src/analysis_cache.py` | Cache manager for incremental analysis, gate state tracking |
 | `src/claude_client.py` | Anthropic API wrapper with retry logic and specialized prompts |
 | `src/data_loader.py` | Excel parsing with flexible column mapping |
 | `src/scoring.py` | 8-component criticality formula and account health calculation |
+| `src/dashboard/filters.py` | Display layer filters (pure recency check) |
 | `config/settings.py` | Models, weights, thresholds, TrueNAS context prompt |
 
 ### Criticality Score Components (~250 max points)
@@ -124,4 +132,5 @@ Tests use pytest with fixtures in `tests/conftest.py`. Current coverage focuses 
 
 ### Data Persistence
 
-Analysis results persist to `data/last_analysis.json` to survive page refreshes. Clear via sidebar button or delete file directly.
+- **Analysis cache**: `data/analysis_cache.json` - Stores gate states, frustration scores, timelines. Survives across uploads for incremental analysis.
+- **Dashboard results**: `data/last_analysis.json` - Survives page refreshes. Clear via sidebar button.
