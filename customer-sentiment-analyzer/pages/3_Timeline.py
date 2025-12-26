@@ -276,7 +276,7 @@ def display_timeline_entry(index: int, entry: dict):
         message_excerpt = entry.get('message_excerpt', '')
         if message_excerpt and has_frustration:
             st.markdown(f"""
-            <div style="background: #2d2315; border-left: 4px solid {COLORS['warning']};
+            <div style="background: {COLORS['warning_tint']}; border-left: 4px solid {COLORS['warning']};
                         padding: 15px; margin: 10px 0; border-radius: 0 8px 8px 0;">
                 <strong style="color: {COLORS['warning']};">Customer Message:</strong><br/>
                 <p style="color: {COLORS['text']}; margin: 10px 0 0 0; font-style: italic;">
@@ -296,7 +296,7 @@ def display_timeline_entry(index: int, entry: dict):
         frustration_detail = clean_text(entry.get('frustration_detail', ''))
         if has_frustration and frustration_detail:
             st.markdown(f"""
-            <div style="background: #2d1515; border-left: 4px solid {COLORS['critical']};
+            <div style="background: {COLORS['critical_tint']}; border-left: 4px solid {COLORS['critical']};
                         padding: 15px; margin: 10px 0; border-radius: 0 8px 8px 0;">
                 <strong style="color: {COLORS['critical']};">😤 Frustration Detected:</strong>
                 <p style="color: {COLORS['text']}; margin: 10px 0 0 0;">{frustration_detail}</p>
@@ -306,7 +306,7 @@ def display_timeline_entry(index: int, entry: dict):
         failure_detail = clean_text(entry.get('failure_pattern_detail', ''))
         if has_failure and failure_detail:
             st.markdown(f"""
-            <div style="background: #2d1515; border-left: 4px solid {COLORS['critical']};
+            <div style="background: {COLORS['critical_tint']}; border-left: 4px solid {COLORS['critical']};
                         padding: 15px; margin: 10px 0; border-radius: 0 8px 8px 0;">
                 <strong style="color: {COLORS['critical']};">⚠️ Failure Pattern:</strong>
                 <p style="color: {COLORS['text']}; margin: 10px 0 0 0;">{failure_detail}</p>
@@ -328,7 +328,7 @@ def display_timeline_entry(index: int, entry: dict):
         positive_detail = clean_text(entry.get('positive_action_detail', ''))
         if has_positive and positive_detail:
             st.markdown(f"""
-            <div style="background: #152d15; border-left: 4px solid {COLORS['success']};
+            <div style="background: {COLORS['success_tint']}; border-left: 4px solid {COLORS['success']};
                         padding: 15px; margin: 10px 0; border-radius: 0 8px 8px 0;">
                 <strong style="color: {COLORS['success']};">✅ Positive Action:</strong>
                 <p style="color: {COLORS['text']}; margin: 10px 0 0 0;">{positive_detail}</p>
@@ -338,7 +338,7 @@ def display_timeline_entry(index: int, entry: dict):
         positive_excerpt = entry.get('positive_excerpt', '')
         if positive_excerpt:
             st.markdown(f"""
-            <div style="background: #152d15; border-left: 4px solid {COLORS['success']};
+            <div style="background: {COLORS['success_tint']}; border-left: 4px solid {COLORS['success']};
                         padding: 15px; margin: 10px 0; border-radius: 0 8px 8px 0;">
                 <strong style="color: {COLORS['success']};">Customer Quote:</strong>
                 <p style="color: {COLORS['text']}; margin: 10px 0 0 0; font-style: italic;">
@@ -370,7 +370,7 @@ def display_timeline_summary(case: dict, deepseek: dict, claude: dict):
     key_phrase = claude.get('key_phrase', '')
     if key_phrase:
         st.markdown(f"""
-        <div style="background: #2d2315; border-left: 4px solid {COLORS['warning']};
+        <div style="background: {COLORS['warning_tint']}; border-left: 4px solid {COLORS['warning']};
                     padding: 15px; margin-bottom: 1rem; border-radius: 0 8px 8px 0;">
             <strong style="color: {COLORS['warning']};">Key Customer Quote:</strong>
             <p style="color: {COLORS['text']}; margin: 10px 0 0 0; font-style: italic; font-size: 1.1rem;">
@@ -398,7 +398,7 @@ def display_timeline_summary(case: dict, deepseek: dict, claude: dict):
         pain_points = deepseek.get('pain_points', '')
         if pain_points:
             st.markdown(f"""
-            <div style="background: #2d2315; border-left: 4px solid {COLORS['warning']};
+            <div style="background: {COLORS['warning_tint']}; border-left: 4px solid {COLORS['warning']};
                         padding: 15px; margin-bottom: 1rem; border-radius: 0 8px 8px 0;">
                 <strong style="color: {COLORS['warning']};">Pain Points:</strong>
                 <p style="color: {COLORS['text']}; margin: 10px 0 0 0;">{clean_text(pain_points)}</p>
@@ -421,7 +421,7 @@ def display_timeline_summary(case: dict, deepseek: dict, claude: dict):
         recommended_action = deepseek.get('recommended_action', '')
         if recommended_action:
             st.markdown(f"""
-            <div style="background: #152d15; border-left: 4px solid {COLORS['success']};
+            <div style="background: {COLORS['success_tint']}; border-left: 4px solid {COLORS['success']};
                         padding: 15px; margin-bottom: 1rem; border-radius: 0 8px 8px 0;">
                 <strong style="color: {COLORS['success']};">Recommended Action:</strong>
                 <p style="color: {COLORS['text']}; margin: 10px 0 0 0;">{clean_text(recommended_action)}</p>

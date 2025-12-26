@@ -99,7 +99,7 @@ def main():
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if api_key:
             st.markdown(f"""
-            <div style="background: #152d15; padding: 0.5rem 1rem; border-radius: 6px;
+            <div style="background: {COLORS['success_tint']}; padding: 0.5rem 1rem; border-radius: 6px;
                         border: 1px solid {COLORS['success']}; margin-bottom: 0.5rem;">
                 <span style="color: {COLORS['success']};">&#10003; API Key Configured</span>
             </div>
@@ -211,7 +211,7 @@ def main():
     # Show cache status
     if cache_stats["total_cases"] > 0:
         st.markdown(f"""
-        <div style="background: #152d15; padding: 0.75rem 1rem; border-radius: 6px;
+        <div style="background: {COLORS['success_tint']}; padding: 0.75rem 1rem; border-radius: 6px;
                     border: 1px solid {COLORS['success']}; margin-bottom: 1rem;">
             <span style="color: {COLORS['success']};">&#128202; Cache: {cache_stats['open_cases']} open cases, {cache_stats['closed_cases']} closed</span>
         </div>
@@ -265,7 +265,8 @@ def main():
                     st.markdown(f"""
                     <div style="background: {COLORS['surface']}; padding: 0.75rem; border-radius: 6px;
                                 border-left: 3px solid {COLORS['warning']}; margin-bottom: 0.5rem;">
-                        <strong>{case.get('customer_name', 'Unknown')}</strong> - Case {case.get('case_number')}<br/>
+                        <strong style="color: {COLORS['text']};">{case.get('customer_name', 'Unknown')}</strong>
+                        <span style="color: {COLORS['text']};">- Case {case.get('case_number')}</span><br/>
                         <span style="color: {COLORS['text_muted']};">
                             {trend_icon} Recent frustration: {metrics.get('recent_frustration', 0)}/10 |
                             Trend: {metrics.get('trend', 'stable')}
@@ -401,8 +402,8 @@ def main():
                     border: 1px solid {COLORS['border']}; border-left: 4px solid {COLORS['success']};">
             <h3 style="color: {COLORS['success']}; margin: 0;">✓ Results Ready</h3>
             <p style="color: {COLORS['text_muted']}; margin: 5px 0 0 0;">
-                Use sidebar navigation: <strong>Overview</strong>, <strong>Cases</strong>,
-                <strong>Timeline</strong>, <strong>Trends</strong>, <strong>Export</strong>
+                Use sidebar navigation: <strong style="color: {COLORS['text']};">Overview</strong>, <strong style="color: {COLORS['text']};">Cases</strong>,
+                <strong style="color: {COLORS['text']};">Timeline</strong>, <strong style="color: {COLORS['text']};">Trends</strong>, <strong style="color: {COLORS['text']};">Export</strong>
             </p>
         </div>
         """, unsafe_allow_html=True)

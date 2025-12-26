@@ -304,11 +304,16 @@ def main():
                 labels=list(severity_dist.keys()),
                 values=list(severity_dist.values()),
                 hole=0.4,
-                marker_colors=[COLORS['critical'], COLORS['warning'], COLORS['secondary'], COLORS['text_muted']]
+                marker_colors=[COLORS['critical'], COLORS['warning'], COLORS['secondary'], COLORS['text_muted']],
+                textfont=dict(color=COLORS['text'], size=12),
+                textinfo='label+percent',
+                insidetextorientation='radial'
             )])
             fig = apply_plotly_theme(fig)
-            fig.update_layout(height=350)
+            fig.update_layout(height=350, showlegend=True)
             st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No severity distribution data available")
 
     with col2:
         st.markdown(f"<h4 style='color: {COLORS['text']}'>Support Level Distribution</h4>", unsafe_allow_html=True)
@@ -318,11 +323,16 @@ def main():
                 labels=list(support_dist.keys()),
                 values=list(support_dist.values()),
                 hole=0.4,
-                marker_colors=[COLORS['warning'], COLORS['secondary'], COLORS['text_muted'], COLORS['border']]
+                marker_colors=[COLORS['warning'], COLORS['secondary'], COLORS['text_muted'], COLORS['border']],
+                textfont=dict(color=COLORS['text'], size=12),
+                textinfo='label+percent',
+                insidetextorientation='radial'
             )])
             fig = apply_plotly_theme(fig)
-            fig.update_layout(height=350)
+            fig.update_layout(height=350, showlegend=True)
             st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No support level distribution data available")
 
     # Issue classes and resolution outlooks
     col1, col2 = st.columns(2)

@@ -243,7 +243,7 @@ def display_case_detail(case: dict):
         if summary_content:
             crit_color = COLORS['critical'] if criticality >= 180 else COLORS['warning']
             st.markdown(f"""
-            <div style="background: linear-gradient(135deg, {COLORS['surface']} 0%, #1a1a2e 100%);
+            <div style="background: {COLORS['surface']};
                         padding: 1.25rem; border-radius: 10px; margin-bottom: 1rem;
                         border: 1px solid {crit_color}; border-left: 4px solid {crit_color};">
                 <div style="display: flex; align-items: center; margin-bottom: 0.75rem;">
@@ -325,7 +325,7 @@ def display_case_detail(case: dict):
             # Pain points
             if deepseek.get("pain_points"):
                 st.markdown(f"""
-                <div style="background: #2d2315; border-left: 4px solid {COLORS['warning']};
+                <div style="background: {COLORS['warning_tint']}; border-left: 4px solid {COLORS['warning']};
                             padding: 15px; border-radius: 0 8px 8px 0;">
                     <strong style="color: {COLORS['warning']};">Pain Points</strong>
                     <p style="color: {COLORS['text']}; margin: 10px 0 0 0;">{deepseek['pain_points']}</p>
@@ -346,7 +346,7 @@ def display_case_detail(case: dict):
             # Recommended action
             if deepseek.get("recommended_action"):
                 st.markdown(f"""
-                <div style="background: #152d15; border-left: 4px solid {COLORS['success']};
+                <div style="background: {COLORS['success_tint']}; border-left: 4px solid {COLORS['success']};
                             padding: 15px; border-radius: 0 8px 8px 0;">
                     <strong style="color: {COLORS['success']};">Recommended Action</strong>
                     <p style="color: {COLORS['text']}; margin: 10px 0 0 0;">{deepseek['recommended_action']}</p>
@@ -391,7 +391,7 @@ def display_case_detail(case: dict):
     elif claude.get("key_phrase"):
         st.markdown(f"<h3 style='color: {COLORS['text']}'>Key Phrase</h3>", unsafe_allow_html=True)
         st.markdown(f"""
-        <div style="background: #2d2315; border-left: 4px solid {COLORS['warning']};
+        <div style="background: {COLORS['warning_tint']}; border-left: 4px solid {COLORS['warning']};
                     padding: 15px; border-radius: 0 8px 8px 0;">
             <p style="color: {COLORS['text']}; margin: 0; font-style: italic;">
                 "{claude['key_phrase']}"

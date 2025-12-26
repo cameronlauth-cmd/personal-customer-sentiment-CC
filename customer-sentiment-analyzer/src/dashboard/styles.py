@@ -14,20 +14,25 @@ def get_global_css() -> str:
     """
     return f"""
     <style>
-        /* Import Inter font - Professional typography */
+        /* Import Inter font - Matches TrueNAS site typography */
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-        /* Global styles - Enterprise design system */
+        /* Global styles - TrueNAS + Apple fusion */
         .stApp {{
             background-color: {COLORS["background"]};
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
+            letter-spacing: -0.01em;
         }}
 
-        /* Subtle transitions */
+        /* Apple-style transitions - smooth cubic-bezier */
         *, *::before, *::after {{
-            transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+            transition: background-color 0.3s cubic-bezier(0.4, 0, 0.6, 1),
+                        border-color 0.3s cubic-bezier(0.4, 0, 0.6, 1),
+                        box-shadow 0.3s cubic-bezier(0.4, 0, 0.6, 1),
+                        color 0.3s cubic-bezier(0.4, 0, 0.6, 1),
+                        opacity 0.3s cubic-bezier(0.4, 0, 0.6, 1);
         }}
 
         /* Headers - Clean enterprise typography */
@@ -70,13 +75,55 @@ def get_global_css() -> str:
 
         /* Sidebar navigation links */
         section[data-testid="stSidebar"] a {{
-            color: {COLORS["text_muted"]};
+            color: {COLORS["text_muted"]} !important;
             text-decoration: none;
             transition: color 0.15s ease;
         }}
 
         section[data-testid="stSidebar"] a:hover {{
-            color: {COLORS["primary"]};
+            color: {COLORS["primary"]} !important;
+        }}
+
+        /* Streamlit multi-page navigation - Force light theme */
+        [data-testid="stSidebarNav"] {{
+            background: {COLORS["surface"]} !important;
+        }}
+
+        [data-testid="stSidebarNav"] li {{
+            background: transparent !important;
+        }}
+
+        [data-testid="stSidebarNav"] a {{
+            color: {COLORS["text_muted"]} !important;
+            background: transparent !important;
+        }}
+
+        [data-testid="stSidebarNav"] a:hover {{
+            color: {COLORS["primary"]} !important;
+            background: {COLORS["surface_light"]} !important;
+        }}
+
+        [data-testid="stSidebarNav"] a[aria-selected="true"] {{
+            background: {COLORS["surface_light"]} !important;
+            color: {COLORS["text"]} !important;
+        }}
+
+        [data-testid="stSidebarNav"] span {{
+            color: inherit !important;
+        }}
+
+        /* Fix sidebar nav container backgrounds */
+        [data-testid="stSidebarNavItems"],
+        [data-testid="stSidebarNavSeparator"],
+        section[data-testid="stSidebar"] > div {{
+            background: {COLORS["surface"]} !important;
+        }}
+
+        /* Ensure all sidebar text is visible */
+        section[data-testid="stSidebar"] span,
+        section[data-testid="stSidebar"] p,
+        section[data-testid="stSidebar"] label {{
+            color: {COLORS["text"]} !important;
         }}
 
         /* Metrics */
@@ -93,74 +140,142 @@ def get_global_css() -> str:
             letter-spacing: 0.05em;
         }}
 
-        /* Expanders - Clean card style */
+        /* Expanders - Clean card style for light theme */
         .streamlit-expanderHeader {{
-            background: {COLORS["surface"]};
-            border: 1px solid {COLORS["border"]};
+            background: {COLORS["surface"]} !important;
+            border: 1px solid {COLORS["border"]} !important;
             border-radius: 8px;
-            color: {COLORS["text"]};
+            color: {COLORS["text"]} !important;
             font-weight: 500;
         }}
 
         .streamlit-expanderHeader:hover {{
-            background: {COLORS["surface_light"]};
-            border-color: {COLORS["primary"]};
+            background: {COLORS["surface_light"]} !important;
+            border-color: {COLORS["primary"]} !important;
         }}
 
         .streamlit-expanderContent {{
-            background: {COLORS["surface"]};
-            border: 1px solid {COLORS["border"]};
+            background: {COLORS["background"]} !important;
+            border: 1px solid {COLORS["border"]} !important;
             border-top: none;
             border-radius: 0 0 8px 8px;
         }}
 
-        /* Dataframes */
+        /* Expander text visibility */
+        .streamlit-expanderHeader span,
+        .streamlit-expanderHeader p {{
+            color: {COLORS["text"]} !important;
+        }}
+
+        /* Streamlit expander modern selectors */
+        [data-testid="stExpander"] {{
+            background: {COLORS["background"]} !important;
+            border: 1px solid {COLORS["border"]} !important;
+            border-radius: 8px;
+        }}
+
+        [data-testid="stExpander"] summary {{
+            background: {COLORS["surface"]} !important;
+            color: {COLORS["text"]} !important;
+        }}
+
+        [data-testid="stExpander"] summary:hover {{
+            background: {COLORS["surface_light"]} !important;
+        }}
+
+        [data-testid="stExpander"] summary span {{
+            color: {COLORS["text"]} !important;
+        }}
+
+        /* Dataframes - iX Blue Theme */
         .stDataFrame {{
-            background-color: {COLORS["surface"]};
+            background-color: {COLORS["background"]};
             border-radius: 8px;
             border: 1px solid {COLORS["border"]};
         }}
 
         [data-testid="stDataFrame"] > div {{
-            background-color: {COLORS["surface"]};
+            background-color: {COLORS["background"]};
         }}
 
-        /* Buttons - Enterprise flat style */
+        /* Dataframe header - iX Blue */
+        [data-testid="stDataFrame"] thead tr th {{
+            background-color: {COLORS["primary"]} !important;
+            color: white !important;
+            font-weight: 600 !important;
+            padding: 0.75rem 1rem !important;
+            border-bottom: 2px solid #0080b8 !important;
+        }}
+
+        /* Dataframe cells */
+        [data-testid="stDataFrame"] tbody tr td {{
+            color: {COLORS["text"]} !important;
+            background-color: {COLORS["background"]} !important;
+            padding: 0.5rem 1rem !important;
+            border-bottom: 1px solid {COLORS["border"]} !important;
+        }}
+
+        /* Dataframe row hover */
+        [data-testid="stDataFrame"] tbody tr:hover td {{
+            background-color: {COLORS["surface"]} !important;
+        }}
+
+        /* Dataframe selected row */
+        [data-testid="stDataFrame"] tbody tr[data-selected="true"] td {{
+            background-color: rgba(0, 149, 213, 0.15) !important;
+            border-left: 3px solid {COLORS["primary"]} !important;
+        }}
+
+        /* Progress columns in dataframe */
+        [data-testid="stDataFrame"] [role="progressbar"] {{
+            background-color: {COLORS["surface_light"]} !important;
+        }}
+
+        [data-testid="stDataFrame"] [role="progressbar"] > div {{
+            background-color: {COLORS["primary"]} !important;
+        }}
+
+        /* Buttons - TrueNAS rounded style with Apple transitions */
         .stButton > button {{
             background: {COLORS["primary"]};
             color: white;
             border: none;
-            border-radius: 6px;
+            border-radius: 30px;
             font-weight: 500;
-            padding: 0.625rem 1.25rem;
-            transition: all 0.15s ease;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+            padding: 0.75rem 1.5rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.6, 1);
+            box-shadow: 0 1px 2px rgba(0, 149, 213, 0.15);
+            letter-spacing: 0;
         }}
 
         .stButton > button:hover {{
-            background: #2563eb;
-            box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.25);
+            background: #0080b8;
+            box-shadow: 0 4px 12px rgba(0, 149, 213, 0.25);
+            transform: translateY(-1px);
         }}
 
         .stButton > button:active {{
-            background: #1d4ed8;
+            background: #006699;
             box-shadow: none;
+            transform: translateY(0);
         }}
 
-        /* Download buttons */
+        /* Download buttons - TrueNAS green */
         .stDownloadButton > button {{
             background: {COLORS["accent"]};
             color: white;
             border: none;
-            border-radius: 6px;
+            border-radius: 30px;
             font-weight: 500;
-            padding: 0.625rem 1.25rem;
-            transition: all 0.15s ease;
+            padding: 0.75rem 1.5rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.6, 1);
+            box-shadow: 0 1px 2px rgba(113, 191, 68, 0.15);
         }}
 
         .stDownloadButton > button:hover {{
-            background: #059669;
-            box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.25);
+            background: #5a9e32;
+            box-shadow: 0 4px 12px rgba(113, 191, 68, 0.25);
+            transform: translateY(-1px);
         }}
 
         /* Selectbox */
@@ -184,24 +299,25 @@ def get_global_css() -> str:
             background: {COLORS["surface_light"]};
         }}
 
-        /* Secondary/Danger buttons (for destructive actions) */
+        /* Secondary/Sidebar buttons - Light theme outline style */
         .stButton > button[kind="secondary"],
         div[data-testid="stSidebar"] .stButton > button {{
-            background: {COLORS["surface_light"]};
+            background: {COLORS["background"]};
             color: {COLORS["text"]};
             border: 1px solid {COLORS["border"]};
+            border-radius: 30px;
         }}
 
         div[data-testid="stSidebar"] .stButton > button:hover {{
             background: {COLORS["surface"]};
-            border-color: {COLORS["critical"]};
-            color: {COLORS["critical"]};
+            border-color: {COLORS["primary"]};
+            color: {COLORS["primary"]};
         }}
 
-        /* Tabs - Enterprise segmented control */
+        /* Tabs - TrueNAS pill-style with Apple transitions */
         .stTabs [data-baseweb="tab-list"] {{
             background: {COLORS["surface"]};
-            border-radius: 8px;
+            border-radius: 30px;
             padding: 4px;
             border: 1px solid {COLORS["border"]};
             gap: 4px;
@@ -210,8 +326,8 @@ def get_global_css() -> str:
         .stTabs [data-baseweb="tab"] {{
             color: {COLORS["text_muted"]};
             font-weight: 500;
-            border-radius: 6px;
-            transition: all 0.15s ease;
+            border-radius: 30px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.6, 1);
         }}
 
         .stTabs [data-baseweb="tab"]:hover {{
@@ -222,7 +338,7 @@ def get_global_css() -> str:
         .stTabs [aria-selected="true"] {{
             background: {COLORS["primary"]};
             color: white;
-            border-radius: 6px;
+            border-radius: 30px;
         }}
 
         /* Dividers */
@@ -311,44 +427,44 @@ def get_global_css() -> str:
             background: {COLORS["text_muted"]};
         }}
 
-        /* Custom content boxes - Enterprise style with subtle accents */
+        /* Custom content boxes - Light theme with TrueNAS colors */
         .content-box-critical {{
-            background: rgba(239, 68, 68, 0.08);
+            background: {COLORS["critical_tint"]};
             border-left: 3px solid {COLORS["critical"]};
             padding: 1rem 1.25rem;
-            border-radius: 0 8px 8px 0;
+            border-radius: 0 12px 12px 0;
             margin: 0.75rem 0;
         }}
 
         .content-box-warning {{
-            background: rgba(245, 158, 11, 0.08);
+            background: {COLORS["warning_tint"]};
             border-left: 3px solid {COLORS["warning"]};
             padding: 1rem 1.25rem;
-            border-radius: 0 8px 8px 0;
+            border-radius: 0 12px 12px 0;
             margin: 0.75rem 0;
         }}
 
         .content-box-success {{
-            background: rgba(16, 185, 129, 0.08);
+            background: {COLORS["success_tint"]};
             border-left: 3px solid {COLORS["success"]};
             padding: 1rem 1.25rem;
-            border-radius: 0 8px 8px 0;
+            border-radius: 0 12px 12px 0;
             margin: 0.75rem 0;
         }}
 
         .content-box-info {{
-            background: rgba(59, 130, 246, 0.08);
+            background: {COLORS["cyan_tint"]};
             border-left: 3px solid {COLORS["primary"]};
             padding: 1rem 1.25rem;
-            border-radius: 0 8px 8px 0;
+            border-radius: 0 12px 12px 0;
             margin: 0.75rem 0;
         }}
 
         .content-box-neutral {{
             background: {COLORS["surface"]};
-            border-left: 3px solid {COLORS["text_muted"]};
+            border-left: 3px solid {COLORS["border"]};
             padding: 1rem 1.25rem;
-            border-radius: 0 8px 8px 0;
+            border-radius: 0 12px 12px 0;
             margin: 0.75rem 0;
         }}
 
@@ -394,7 +510,7 @@ def get_global_css() -> str:
 
 
 def get_plotly_theme() -> dict:
-    """Get Plotly theme configuration for dark mode.
+    """Get Plotly theme configuration for TrueNAS light mode.
 
     Returns:
         Dictionary with Plotly layout settings
@@ -403,15 +519,14 @@ def get_plotly_theme() -> dict:
         "paper_bgcolor": COLORS["background"],
         "plot_bgcolor": COLORS["surface"],
         "font": {
-            "color": COLORS["text"],
-            "family": "Inter, -apple-system, BlinkMacSystemFont, sans-serif",
+            "color": COLORS["text"],  # Dark text for light mode
+            "family": "Inter, -apple-system, BlinkMacSystemFont, SF Pro Text, sans-serif",
             "size": 12,
         },
         "title": {
             "font": {
                 "color": COLORS["text"],
                 "size": 14,
-                "weight": 600,
             },
             "x": 0,
             "xanchor": "left",
@@ -420,29 +535,34 @@ def get_plotly_theme() -> dict:
             "gridcolor": COLORS["border"],
             "linecolor": COLORS["border"],
             "tickcolor": COLORS["text_muted"],
-            "tickfont": {"size": 11},
+            "tickfont": {"size": 11, "color": COLORS["text_muted"]},
+            "title": {"font": {"color": COLORS["text"], "size": 12}},
             "gridwidth": 1,
+            "zeroline": False,
         },
         "yaxis": {
             "gridcolor": COLORS["border"],
             "linecolor": COLORS["border"],
             "tickcolor": COLORS["text_muted"],
-            "tickfont": {"size": 11},
+            "tickfont": {"size": 11, "color": COLORS["text_muted"]},
+            "title": {"font": {"color": COLORS["text"], "size": 12}},
             "gridwidth": 1,
+            "zeroline": False,
         },
         "legend": {
-            "bgcolor": "rgba(0,0,0,0)",
+            "bgcolor": "rgba(255,255,255,0)",
             "bordercolor": "rgba(0,0,0,0)",
             "font": {"color": COLORS["text"], "size": 11},
         },
         "margin": {"l": 40, "r": 20, "t": 40, "b": 40},
-        "colorway": [COLORS["primary"], COLORS["accent"], COLORS["secondary"],
-                     COLORS["warning"], COLORS["critical"]],
+        # TrueNAS color palette: cyan, green, lighter cyan, warning, critical
+        "colorway": ["#0095d5", "#71bf44", "#31beef", "#ff9500", "#ff3b30",
+                     "#5856d6", "#ff9f0a", "#34c759"],
     }
 
 
 def apply_plotly_theme(fig):
-    """Apply dark theme to a Plotly figure.
+    """Apply light theme to a Plotly figure.
 
     Args:
         fig: Plotly figure object
@@ -452,4 +572,16 @@ def apply_plotly_theme(fig):
     """
     theme = get_plotly_theme()
     fig.update_layout(**theme)
+
+    # Explicitly update axis title fonts to ensure they're visible
+    # This is needed because string titles don't inherit from theme
+    fig.update_xaxes(
+        title_font=dict(color=COLORS["text"], size=13, family="Inter, sans-serif"),
+        tickfont=dict(color=COLORS["text_muted"], size=11)
+    )
+    fig.update_yaxes(
+        title_font=dict(color=COLORS["text"], size=13, family="Inter, sans-serif"),
+        tickfont=dict(color=COLORS["text_muted"], size=11)
+    )
+
     return fig
