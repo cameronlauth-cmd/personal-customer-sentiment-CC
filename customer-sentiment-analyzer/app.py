@@ -410,17 +410,43 @@ def main():
 
         results = st.session_state['analysis_results']
         stats = results.get("statistics", {}).get("haiku", {})
+        total_cases = results.get("total_cases", 0)
+        high_frust = stats.get("high_frustration", 0)
+        avg_frust = stats.get("avg_frustration_score", 0)
 
+        # Hero metrics for quick summary
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Cases", results.get("total_cases", 0))
+            st.markdown(f"""
+            <div class="hero-metric">
+                <div class="hero-metric-value" style="color: {COLORS['primary']};">{total_cases}</div>
+                <div class="hero-metric-label">Total Cases</div>
+            </div>
+            """, unsafe_allow_html=True)
         with col2:
-            st.metric("High Frustration", stats.get("high_frustration", 0))
+            high_color = COLORS['critical'] if high_frust > 0 else COLORS['success']
+            st.markdown(f"""
+            <div class="hero-metric" style="border-color: {high_color}; border-width: 2px;">
+                <div class="hero-metric-value" style="color: {high_color};">{high_frust}</div>
+                <div class="hero-metric-label">High Frustration</div>
+            </div>
+            """, unsafe_allow_html=True)
         with col3:
-            st.metric("Avg Frustration", f"{stats.get('avg_frustration_score', 0):.1f}/10")
+            frust_color = COLORS['critical'] if avg_frust >= 7 else (COLORS['warning'] if avg_frust >= 4 else COLORS['success'])
+            st.markdown(f"""
+            <div class="hero-metric">
+                <div class="hero-metric-value" style="color: {frust_color};">{avg_frust:.1f}</div>
+                <div class="hero-metric-label">Avg Frustration /10</div>
+            </div>
+            """, unsafe_allow_html=True)
         with col4:
             source = results.get("source", "analysis")
-            st.metric("Source", source.title())
+            st.markdown(f"""
+            <div class="hero-metric">
+                <div class="hero-metric-value" style="color: {COLORS['text']}; font-size: 1.5rem;">{source.title()}</div>
+                <div class="hero-metric-label">Data Source</div>
+            </div>
+            """, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":

@@ -317,7 +317,7 @@ def main():
     """, unsafe_allow_html=True)
 
     # Top critical cases
-    st.markdown(f"<h3 style='color: {COLORS['text']}'>Critical Cases</h3>", unsafe_allow_html=True)
+    st.markdown(f"""<div class="section-header">🎯 Top Critical Cases</div>""", unsafe_allow_html=True)
     fig = create_top_cases_chart(cases, top_n=10)
     st.plotly_chart(fig, use_container_width=True)
 
@@ -376,7 +376,7 @@ def main():
 
     # Summary statistics table
     st.divider()
-    st.markdown(f"<h3 style='color: {COLORS['text']}'>Analysis Summary</h3>", unsafe_allow_html=True)
+    st.markdown(f"""<div class="section-header">📋 Analysis Summary</div>""", unsafe_allow_html=True)
 
     stats = results.get("statistics", {})
     haiku_stats = stats.get("haiku", {})

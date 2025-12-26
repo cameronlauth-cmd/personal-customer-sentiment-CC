@@ -126,18 +126,97 @@ def get_global_css() -> str:
             color: {COLORS["text"]} !important;
         }}
 
-        /* Metrics */
+        /* Metrics - Larger for executive visibility */
         [data-testid="stMetricValue"] {{
             color: {COLORS["text"]};
-            font-weight: 600;
-            font-size: 1.5rem;
+            font-weight: 700;
+            font-size: 2.25rem;
+            line-height: 1.1;
         }}
 
         [data-testid="stMetricLabel"] {{
             color: {COLORS["text_muted"]};
-            font-size: 0.75rem;
+            font-size: 0.8rem;
             text-transform: uppercase;
             letter-spacing: 0.05em;
+            font-weight: 500;
+        }}
+
+        [data-testid="stMetricDelta"] {{
+            font-size: 0.9rem;
+            font-weight: 600;
+        }}
+
+        /* Hero metrics - Extra large for key KPIs */
+        .hero-metric {{
+            background: {COLORS["surface"]};
+            border-radius: 16px;
+            padding: 1.5rem 2rem;
+            border: 1px solid {COLORS["border"]};
+            box-shadow: {COLORS["shadow"]};
+            text-align: center;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.6, 1);
+        }}
+
+        .hero-metric:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }}
+
+        .hero-metric-value {{
+            font-size: 3rem;
+            font-weight: 700;
+            line-height: 1;
+            letter-spacing: -0.02em;
+        }}
+
+        .hero-metric-label {{
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: {COLORS["text_muted"]};
+            font-weight: 500;
+            margin-top: 0.5rem;
+        }}
+
+        /* Trend indicators with bold backgrounds */
+        .trend-up {{
+            background: {COLORS["success_tint"]};
+            border: 2px solid {COLORS["success"]};
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+        }}
+
+        .trend-down {{
+            background: {COLORS["critical_tint"]};
+            border: 2px solid {COLORS["critical"]};
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+        }}
+
+        .trend-neutral {{
+            background: {COLORS["surface"]};
+            border: 2px solid {COLORS["border"]};
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+        }}
+
+        /* Section headers - Bolder and more prominent */
+        .section-header {{
+            color: {COLORS["text"]};
+            font-size: 1.25rem;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            margin: 1.5rem 0 1rem 0;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid {COLORS["border"]};
+        }}
+
+        .section-subheader {{
+            color: {COLORS["text_muted"]};
+            font-size: 0.9rem;
+            margin-top: -0.75rem;
+            margin-bottom: 1rem;
         }}
 
         /* Expanders - Clean card style for light theme */

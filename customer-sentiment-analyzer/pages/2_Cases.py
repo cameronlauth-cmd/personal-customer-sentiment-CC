@@ -83,6 +83,45 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
+    # Quick summary stats
+    critical_count = sum(1 for c in cases if c.get("criticality_score", 0) >= 180)
+    high_count = sum(1 for c in cases if c.get("criticality_score", 0) >= 140 and c.get("criticality_score", 0) < 180)
+    timeline_count = sum(1 for c in cases if (c.get("deepseek_analysis") or {}).get("timeline_entries"))
+
+    qcol1, qcol2, qcol3, qcol4 = st.columns(4)
+    with qcol1:
+        crit_color = COLORS['critical'] if critical_count > 0 else COLORS['text_muted']
+        st.markdown(f"""
+        <div class="hero-metric" style="padding: 1rem 1.5rem; border-color: {crit_color}; border-width: 2px;">
+            <div class="hero-metric-value" style="font-size: 2rem; color: {crit_color};">{critical_count}</div>
+            <div class="hero-metric-label" style="font-size: 0.75rem;">Critical (180+)</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with qcol2:
+        high_color = COLORS['warning'] if high_count > 0 else COLORS['text_muted']
+        st.markdown(f"""
+        <div class="hero-metric" style="padding: 1rem 1.5rem; border-color: {high_color}; border-width: 2px;">
+            <div class="hero-metric-value" style="font-size: 2rem; color: {high_color};">{high_count}</div>
+            <div class="hero-metric-label" style="font-size: 0.75rem;">High (140-179)</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with qcol3:
+        st.markdown(f"""
+        <div class="hero-metric" style="padding: 1rem 1.5rem;">
+            <div class="hero-metric-value" style="font-size: 2rem; color: {COLORS['primary']};">{timeline_count}</div>
+            <div class="hero-metric-label" style="font-size: 0.75rem;">With Timeline</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with qcol4:
+        st.markdown(f"""
+        <div class="hero-metric" style="padding: 1rem 1.5rem;">
+            <div class="hero-metric-value" style="font-size: 2rem; color: {COLORS['text']};">{len(cases)}</div>
+            <div class="hero-metric-label" style="font-size: 0.75rem;">Total Open</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.divider()
+
     # Filters
     col1, col2, col3, col4 = st.columns(4)
 

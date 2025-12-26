@@ -104,7 +104,7 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # === QUICK STATS ROW ===
+    # === HERO STATS ROW - Large, Bold, Executive-Friendly ===
     stats = results.get("statistics", {})
     haiku_stats = stats.get("haiku", {})
 
@@ -128,38 +128,69 @@ def main():
         if frustration >= 7 or severity in ["S1", "S2"]:
             needs_attention.append(case)
 
+    avg_frust = haiku_stats.get("avg_frustration_score", 0)
+
+    # Hero metrics with large bold numbers and trend-aware backgrounds
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.metric(
-            "Need Immediate Attention",
-            len(needs_attention),
-            help="High frustration (7+) or S1/S2 severity"
-        )
+        # Critical metric - attention needed
+        attention_color = COLORS['critical'] if len(needs_attention) > 0 else COLORS['success']
+        attention_bg = COLORS['critical_tint'] if len(needs_attention) > 0 else COLORS['success_tint']
+        st.markdown(f"""
+        <div class="hero-metric" style="border-color: {attention_color}; border-width: 2px;">
+            <div class="hero-metric-value" style="color: {attention_color};">{len(needs_attention)}</div>
+            <div class="hero-metric-label">Need Attention</div>
+        </div>
+        """, unsafe_allow_html=True)
+
     with col2:
-        st.metric(
-            "Cases Deteriorating",
-            len(deteriorating),
-            delta=f"-{len(deteriorating)}" if deteriorating else None,
-            delta_color="inverse",
-            help="Negative sentiment trend"
-        )
+        # Deteriorating - trend down indicator
+        det_count = len(deteriorating)
+        st.markdown(f"""
+        <div class="trend-down">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                <span style="font-size: 1.5rem;">📉</span>
+                <span style="font-size: 2.5rem; font-weight: 700; color: {COLORS['critical']};">{det_count}</span>
+            </div>
+            <div style="text-align: center; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: {COLORS['critical']}; font-weight: 600; margin-top: 0.25rem;">
+                Deteriorating
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
     with col3:
-        st.metric(
-            "Cases Improving",
-            len(improving),
-            delta=f"+{len(improving)}" if improving else None,
-            help="Positive sentiment trend"
-        )
+        # Improving - trend up indicator
+        imp_count = len(improving)
+        st.markdown(f"""
+        <div class="trend-up">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                <span style="font-size: 1.5rem;">📈</span>
+                <span style="font-size: 2.5rem; font-weight: 700; color: {COLORS['success']};">{imp_count}</span>
+            </div>
+            <div style="text-align: center; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: {COLORS['success']}; font-weight: 600; margin-top: 0.25rem;">
+                Improving
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
     with col4:
-        avg_frust = haiku_stats.get("avg_frustration_score", 0)
-        st.metric("Avg Frustration", f"{avg_frust:.1f}/10")
+        # Avg frustration with color scale
+        frust_color = COLORS['critical'] if avg_frust >= 7 else (COLORS['warning'] if avg_frust >= 4 else COLORS['success'])
+        st.markdown(f"""
+        <div class="hero-metric">
+            <div class="hero-metric-value" style="color: {frust_color};">{avg_frust:.1f}</div>
+            <div class="hero-metric-label">Avg Frustration /10</div>
+        </div>
+        """, unsafe_allow_html=True)
 
     st.divider()
 
     # === CUSTOMER HOTSPOTS ===
-    st.markdown(f"<h3 style='color: {COLORS['text']}'>Customer Hotspots</h3>", unsafe_allow_html=True)
-    st.markdown(f"<p style='color: {COLORS['text_muted']}'>Customers with multiple open cases may have systemic issues</p>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="section-header">🔥 Customer Hotspots</div>
+    <div class="section-subheader">Customers with multiple open cases may have systemic issues</div>
+    """, unsafe_allow_html=True)
 
     # Group cases by customer
     customer_cases = {}
@@ -208,8 +239,10 @@ def main():
     st.divider()
 
     # === RECENT ESCALATION SIGNALS ===
-    st.markdown(f"<h3 style='color: {COLORS['text']}'>Recent Escalation Signals</h3>", unsafe_allow_html=True)
-    st.markdown(f"<p style='color: {COLORS['text_muted']}'>Cases showing signs of customer frustration or negative trends</p>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="section-header">⚠️ Escalation Signals</div>
+    <div class="section-subheader">Cases showing signs of customer frustration or negative trends</div>
+    """, unsafe_allow_html=True)
 
     escalation_cases = []
     for case in cases:
@@ -270,7 +303,9 @@ def main():
     st.divider()
 
     # === KEY METRICS ROW ===
-    st.markdown(f"<h3 style='color: {COLORS['text']}'>Analysis Metrics</h3>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="section-header">📊 Analysis Metrics</div>
+    """, unsafe_allow_html=True)
 
     m1, m2, m3, m4, m5 = st.columns(5)
 
@@ -292,6 +327,10 @@ def main():
     st.divider()
 
     # === DISTRIBUTIONS ===
+    st.markdown(f"""
+    <div class="section-header">📈 Distributions</div>
+    """, unsafe_allow_html=True)
+
     distributions = results.get("distributions", {})
 
     col1, col2 = st.columns(2)
