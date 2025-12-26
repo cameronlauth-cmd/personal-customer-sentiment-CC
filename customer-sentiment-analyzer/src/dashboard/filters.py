@@ -75,10 +75,10 @@ def get_view_mode_indicator_html(view_mode: str, case_count: int, colors: dict) 
         return ""
 
     return f"""
-    <div style="background: #2d1f15; padding: 0.5rem 1rem; border-radius: 6px;
-                border-left: 3px solid {colors.get('warning', '#ffc107')}; margin-bottom: 1rem;">
-        <span style="color: {colors.get('warning', '#ffc107')};">&#9888; Showing Recent Issues Only</span>
-        <span style="color: {colors.get('text_muted', '#8b949e')}; font-size: 0.85rem; margin-left: 0.5rem;">
+    <div style="background: {colors.get('warning_tint', '#fff9e6')}; padding: 0.5rem 1rem; border-radius: 6px;
+                border-left: 3px solid {colors.get('warning', '#ff9500')}; margin-bottom: 1rem;">
+        <span style="color: {colors.get('warning', '#ff9500')};">&#9888; Showing Recent Issues Only</span>
+        <span style="color: {colors.get('text_muted', '#6e6e73')}; font-size: 0.85rem; margin-left: 0.5rem;">
             ({case_count} cases with activity in last {RECENT_WINDOW_DAYS} days)
         </span>
     </div>

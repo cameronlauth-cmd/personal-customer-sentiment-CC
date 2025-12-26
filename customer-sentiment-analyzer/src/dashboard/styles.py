@@ -14,23 +14,48 @@ def get_global_css() -> str:
     """
     return f"""
     <style>
-        /* Import Inter font */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        /* Import Inter font - Matches TrueNAS site typography */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-        /* Global styles */
+        /* Global styles - TrueNAS + Apple fusion */
         .stApp {{
             background-color: {COLORS["background"]};
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            letter-spacing: -0.01em;
         }}
 
-        /* Headers */
+        /* Apple-style transitions - smooth cubic-bezier */
+        *, *::before, *::after {{
+            transition: background-color 0.3s cubic-bezier(0.4, 0, 0.6, 1),
+                        border-color 0.3s cubic-bezier(0.4, 0, 0.6, 1),
+                        box-shadow 0.3s cubic-bezier(0.4, 0, 0.6, 1),
+                        color 0.3s cubic-bezier(0.4, 0, 0.6, 1),
+                        opacity 0.3s cubic-bezier(0.4, 0, 0.6, 1);
+        }}
+
+        /* Headers - Clean enterprise typography */
         h1, h2, h3, h4, h5, h6 {{
             color: {COLORS["text"]};
             font-weight: 600;
+            letter-spacing: -0.025em;
         }}
 
         h1 {{
             color: {COLORS["primary"]};
+            font-weight: 600;
+            font-size: 1.5rem;
+        }}
+
+        h2 {{
+            font-size: 1.25rem;
+            color: {COLORS["text"]};
+        }}
+
+        h3 {{
+            font-size: 1rem;
+            color: {COLORS["text"]};
         }}
 
         /* Paragraphs and text */
@@ -38,9 +63,9 @@ def get_global_css() -> str:
             color: {COLORS["text"]};
         }}
 
-        /* Sidebar */
+        /* Sidebar - Clean enterprise styling */
         section[data-testid="stSidebar"] {{
-            background-color: {COLORS["surface"]};
+            background: {COLORS["surface"]};
             border-right: 1px solid {COLORS["border"]};
         }}
 
@@ -48,80 +73,331 @@ def get_global_css() -> str:
             color: {COLORS["text"]};
         }}
 
-        /* Metrics */
+        /* Sidebar navigation links */
+        section[data-testid="stSidebar"] a {{
+            color: {COLORS["text_muted"]} !important;
+            text-decoration: none;
+            transition: color 0.15s ease;
+        }}
+
+        section[data-testid="stSidebar"] a:hover {{
+            color: {COLORS["primary"]} !important;
+        }}
+
+        /* Streamlit multi-page navigation - Force light theme */
+        [data-testid="stSidebarNav"] {{
+            background: {COLORS["surface"]} !important;
+        }}
+
+        [data-testid="stSidebarNav"] li {{
+            background: transparent !important;
+        }}
+
+        [data-testid="stSidebarNav"] a {{
+            color: {COLORS["text_muted"]} !important;
+            background: transparent !important;
+        }}
+
+        [data-testid="stSidebarNav"] a:hover {{
+            color: {COLORS["primary"]} !important;
+            background: {COLORS["surface_light"]} !important;
+        }}
+
+        [data-testid="stSidebarNav"] a[aria-selected="true"] {{
+            background: {COLORS["surface_light"]} !important;
+            color: {COLORS["text"]} !important;
+        }}
+
+        [data-testid="stSidebarNav"] span {{
+            color: inherit !important;
+        }}
+
+        /* Fix sidebar nav container backgrounds */
+        [data-testid="stSidebarNavItems"],
+        [data-testid="stSidebarNavSeparator"],
+        section[data-testid="stSidebar"] > div {{
+            background: {COLORS["surface"]} !important;
+        }}
+
+        /* Ensure all sidebar text is visible */
+        section[data-testid="stSidebar"] span,
+        section[data-testid="stSidebar"] p,
+        section[data-testid="stSidebar"] label {{
+            color: {COLORS["text"]} !important;
+        }}
+
+        /* Metrics - Larger for executive visibility */
         [data-testid="stMetricValue"] {{
             color: {COLORS["text"]};
             font-weight: 700;
+            font-size: 2.25rem;
+            line-height: 1.1;
         }}
 
         [data-testid="stMetricLabel"] {{
             color: {COLORS["text_muted"]};
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 500;
         }}
 
-        /* Expanders */
-        .streamlit-expanderHeader {{
-            background-color: {COLORS["surface"]};
+        [data-testid="stMetricDelta"] {{
+            font-size: 0.9rem;
+            font-weight: 600;
+        }}
+
+        /* Hero metrics - Extra large for key KPIs */
+        .hero-metric {{
+            background: {COLORS["surface"]};
+            border-radius: 16px;
+            padding: 1.5rem 2rem;
             border: 1px solid {COLORS["border"]};
-            border-radius: 8px;
+            box-shadow: {COLORS["shadow"]};
+            text-align: center;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.6, 1);
+        }}
+
+        .hero-metric:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }}
+
+        .hero-metric-value {{
+            font-size: 3rem;
+            font-weight: 700;
+            line-height: 1;
+            letter-spacing: -0.02em;
+        }}
+
+        .hero-metric-label {{
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: {COLORS["text_muted"]};
+            font-weight: 500;
+            margin-top: 0.5rem;
+        }}
+
+        /* Clickable hero metrics */
+        .hero-metric.clickable {{
+            cursor: pointer;
+        }}
+
+        .hero-metric.clickable:hover {{
+            border-color: {COLORS["primary"]};
+        }}
+
+        .hero-metric.active {{
+            border-color: {COLORS["primary"]};
+            border-width: 2px;
+            box-shadow: 0 0 0 3px rgba(0, 149, 213, 0.2);
+        }}
+
+        /* Metric detail panel - expands below metrics row */
+        .metric-detail-panel {{
+            background: {COLORS["surface"]};
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-top: 1rem;
+            border: 1px solid {COLORS["border"]};
+            box-shadow: {COLORS["shadow"]};
+        }}
+
+        .metric-detail-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid {COLORS["border"]};
+        }}
+
+        .metric-detail-title {{
+            font-size: 1.1rem;
+            font-weight: 600;
             color: {COLORS["text"]};
+        }}
+
+        .metric-detail-close {{
+            cursor: pointer;
+            color: {COLORS["text_muted"]};
+            font-size: 1.25rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            transition: all 0.15s ease;
+        }}
+
+        .metric-detail-close:hover {{
+            background: {COLORS["surface_light"]};
+            color: {COLORS["text"]};
+        }}
+
+        /* Trend indicators with bold backgrounds */
+        .trend-up {{
+            background: {COLORS["success_tint"]};
+            border: 2px solid {COLORS["success"]};
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+        }}
+
+        .trend-down {{
+            background: {COLORS["critical_tint"]};
+            border: 2px solid {COLORS["critical"]};
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+        }}
+
+        .trend-neutral {{
+            background: {COLORS["surface"]};
+            border: 2px solid {COLORS["border"]};
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+        }}
+
+        /* Section headers - Bolder and more prominent */
+        .section-header {{
+            color: {COLORS["text"]};
+            font-size: 1.25rem;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            margin: 1.5rem 0 1rem 0;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid {COLORS["border"]};
+        }}
+
+        .section-subheader {{
+            color: {COLORS["text_muted"]};
+            font-size: 0.9rem;
+            margin-top: -0.75rem;
+            margin-bottom: 1rem;
+        }}
+
+        /* Content cards - Wrap major sections */
+        .content-card {{
+            background: {COLORS["surface"]};
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            border: 1px solid {COLORS["border"]};
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        }}
+
+        .content-card-header {{
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: {COLORS["text"]};
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid {COLORS["border"]};
+        }}
+
+        /* Expanders - Clean card style for light theme */
+        .streamlit-expanderHeader {{
+            background: {COLORS["surface"]} !important;
+            border: 1px solid {COLORS["border"]} !important;
+            border-radius: 8px;
+            color: {COLORS["text"]} !important;
             font-weight: 500;
         }}
 
         .streamlit-expanderHeader:hover {{
-            background-color: {COLORS["surface_light"]};
-            border-color: {COLORS["primary"]};
+            background: {COLORS["surface_light"]} !important;
+            border-color: {COLORS["primary"]} !important;
         }}
 
         .streamlit-expanderContent {{
-            background-color: {COLORS["surface"]};
-            border: 1px solid {COLORS["border"]};
+            background: {COLORS["background"]} !important;
+            border: 1px solid {COLORS["border"]} !important;
             border-top: none;
             border-radius: 0 0 8px 8px;
         }}
 
-        /* Dataframes */
-        .stDataFrame {{
-            background-color: {COLORS["surface"]};
+        /* Expander text visibility */
+        .streamlit-expanderHeader span,
+        .streamlit-expanderHeader p {{
+            color: {COLORS["text"]} !important;
+        }}
+
+        /* Streamlit expander modern selectors */
+        [data-testid="stExpander"] {{
+            background: {COLORS["background"]} !important;
+            border: 1px solid {COLORS["border"]} !important;
             border-radius: 8px;
         }}
 
-        [data-testid="stDataFrame"] > div {{
-            background-color: {COLORS["surface"]};
+        [data-testid="stExpander"] summary {{
+            background: {COLORS["surface"]} !important;
+            color: {COLORS["text"]} !important;
         }}
 
-        /* Buttons */
+        [data-testid="stExpander"] summary:hover {{
+            background: {COLORS["surface_light"]} !important;
+        }}
+
+        [data-testid="stExpander"] summary span {{
+            color: {COLORS["text"]} !important;
+        }}
+
+        /* Dataframes - Streamlit uses Canvas-based Glide Data Grid, limited CSS control */
+        .stDataFrame {{
+            border-radius: 8px;
+            border: 1px solid {COLORS["border"]};
+        }}
+
+        /* Buttons - TrueNAS rounded style with Apple transitions */
         .stButton > button {{
-            background-color: {COLORS["primary"]};
+            background: {COLORS["primary"]};
             color: white;
             border: none;
-            border-radius: 6px;
+            border-radius: 30px;
             font-weight: 500;
-            transition: all 0.2s ease;
+            padding: 0.75rem 1.5rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.6, 1);
+            box-shadow: 0 1px 2px rgba(0, 149, 213, 0.15);
+            letter-spacing: 0;
         }}
 
         .stButton > button:hover {{
-            background-color: {COLORS["secondary"]};
-            box-shadow: 0 4px 12px rgba(0, 149, 213, 0.3);
+            background: #0080b8;
+            box-shadow: 0 4px 12px rgba(0, 149, 213, 0.25);
+            transform: translateY(-1px);
         }}
 
-        /* Download buttons */
+        .stButton > button:active {{
+            background: #006699;
+            box-shadow: none;
+            transform: translateY(0);
+        }}
+
+        /* Download buttons - TrueNAS green */
         .stDownloadButton > button {{
-            background-color: {COLORS["success"]};
+            background: {COLORS["accent"]};
             color: white;
             border: none;
-            border-radius: 6px;
+            border-radius: 30px;
             font-weight: 500;
+            padding: 0.75rem 1.5rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.6, 1);
+            box-shadow: 0 1px 2px rgba(113, 191, 68, 0.15);
         }}
 
         .stDownloadButton > button:hover {{
-            background-color: #218838;
+            background: #5a9e32;
+            box-shadow: 0 4px 12px rgba(113, 191, 68, 0.25);
+            transform: translateY(-1px);
         }}
 
         /* Selectbox */
         .stSelectbox > div > div {{
-            background-color: {COLORS["surface"]};
+            background: {COLORS["surface"]};
             border: 1px solid {COLORS["border"]};
+            border-radius: 6px;
             color: {COLORS["text"]};
+        }}
+
+        .stSelectbox > div > div:hover {{
+            border-color: {COLORS["primary"]};
         }}
 
         /* Slider */
@@ -129,27 +405,56 @@ def get_global_css() -> str:
             background-color: {COLORS["primary"]};
         }}
 
-        /* Tabs */
+        .stSlider [data-baseweb="slider"] {{
+            background: {COLORS["surface_light"]};
+        }}
+
+        /* Secondary/Sidebar buttons - Light theme outline style */
+        .stButton > button[kind="secondary"],
+        div[data-testid="stSidebar"] .stButton > button {{
+            background: {COLORS["background"]};
+            color: {COLORS["text"]};
+            border: 1px solid {COLORS["border"]};
+            border-radius: 30px;
+        }}
+
+        div[data-testid="stSidebar"] .stButton > button:hover {{
+            background: {COLORS["surface"]};
+            border-color: {COLORS["primary"]};
+            color: {COLORS["primary"]};
+        }}
+
+        /* Tabs - TrueNAS pill-style with Apple transitions */
         .stTabs [data-baseweb="tab-list"] {{
-            background-color: {COLORS["surface"]};
-            border-radius: 8px;
+            background: {COLORS["surface"]};
+            border-radius: 30px;
             padding: 4px;
+            border: 1px solid {COLORS["border"]};
+            gap: 4px;
         }}
 
         .stTabs [data-baseweb="tab"] {{
             color: {COLORS["text_muted"]};
             font-weight: 500;
+            border-radius: 30px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.6, 1);
+        }}
+
+        .stTabs [data-baseweb="tab"]:hover {{
+            color: {COLORS["text"]};
+            background: {COLORS["surface_light"]};
         }}
 
         .stTabs [aria-selected="true"] {{
-            background-color: {COLORS["primary"]};
+            background: {COLORS["primary"]};
             color: white;
-            border-radius: 6px;
+            border-radius: 30px;
         }}
 
         /* Dividers */
         hr {{
             border-color: {COLORS["border"]};
+            opacity: 0.5;
         }}
 
         /* Info/Warning/Error boxes */
@@ -160,6 +465,7 @@ def get_global_css() -> str:
         /* Progress bar */
         .stProgress > div > div {{
             background-color: {COLORS["primary"]};
+            border-radius: 4px;
         }}
 
         /* Spinner */
@@ -169,21 +475,47 @@ def get_global_css() -> str:
 
         /* File uploader */
         [data-testid="stFileUploader"] {{
-            background-color: {COLORS["surface"]};
+            background: {COLORS["surface"]};
             border: 2px dashed {COLORS["border"]};
             border-radius: 8px;
-            padding: 1rem;
+            padding: 1.5rem;
+            transition: all 0.15s ease;
         }}
 
         [data-testid="stFileUploader"]:hover {{
             border-color: {COLORS["primary"]};
+            background: rgba(59, 130, 246, 0.05);
         }}
 
-        /* Cards and containers */
-        .css-1r6slb0, .css-12oz5g7 {{
-            background-color: {COLORS["surface"]};
-            border: 1px solid {COLORS["border"]};
+        /* Radio buttons and checkboxes */
+        .stRadio > div {{
+            gap: 0.5rem;
+        }}
+
+        .stRadio label {{
+            color: {COLORS["text"]};
+        }}
+
+        /* Success indicator badges */
+        div[data-testid="stSidebar"] .stSuccess,
+        .element-container:has(.stSuccess) {{
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid {COLORS["accent"]};
+            border-radius: 6px;
+        }}
+
+        /* Sidebar metric cards */
+        div[data-testid="stSidebar"] .stMetric {{
+            background: {COLORS["surface"]};
+            padding: 1rem;
             border-radius: 8px;
+            border: 1px solid {COLORS["border"]};
+        }}
+
+        /* Info text in sidebar */
+        div[data-testid="stSidebar"] small {{
+            color: {COLORS["text_muted"]};
+            font-size: 0.75rem;
         }}
 
         /* Scrollbar styling */
@@ -205,52 +537,90 @@ def get_global_css() -> str:
             background: {COLORS["text_muted"]};
         }}
 
-        /* Custom content boxes */
+        /* Custom content boxes - Light theme with TrueNAS colors */
         .content-box-critical {{
-            background-color: #2d1515;
-            border-left: 4px solid {COLORS["critical"]};
-            padding: 15px;
-            border-radius: 0 8px 8px 0;
-            margin: 10px 0;
+            background: {COLORS["critical_tint"]};
+            border-left: 3px solid {COLORS["critical"]};
+            padding: 1rem 1.25rem;
+            border-radius: 0 12px 12px 0;
+            margin: 0.75rem 0;
         }}
 
         .content-box-warning {{
-            background-color: #2d2315;
-            border-left: 4px solid {COLORS["warning"]};
-            padding: 15px;
-            border-radius: 0 8px 8px 0;
-            margin: 10px 0;
+            background: {COLORS["warning_tint"]};
+            border-left: 3px solid {COLORS["warning"]};
+            padding: 1rem 1.25rem;
+            border-radius: 0 12px 12px 0;
+            margin: 0.75rem 0;
         }}
 
         .content-box-success {{
-            background-color: #152d15;
-            border-left: 4px solid {COLORS["success"]};
-            padding: 15px;
-            border-radius: 0 8px 8px 0;
-            margin: 10px 0;
+            background: {COLORS["success_tint"]};
+            border-left: 3px solid {COLORS["success"]};
+            padding: 1rem 1.25rem;
+            border-radius: 0 12px 12px 0;
+            margin: 0.75rem 0;
         }}
 
         .content-box-info {{
-            background-color: {COLORS["surface"]};
-            border-left: 4px solid {COLORS["primary"]};
-            padding: 15px;
-            border-radius: 0 8px 8px 0;
-            margin: 10px 0;
+            background: {COLORS["cyan_tint"]};
+            border-left: 3px solid {COLORS["primary"]};
+            padding: 1rem 1.25rem;
+            border-radius: 0 12px 12px 0;
+            margin: 0.75rem 0;
         }}
 
         .content-box-neutral {{
-            background-color: {COLORS["surface"]};
-            border-left: 4px solid {COLORS["text_muted"]};
-            padding: 15px;
-            border-radius: 0 8px 8px 0;
-            margin: 10px 0;
+            background: {COLORS["surface"]};
+            border-left: 3px solid {COLORS["border"]};
+            padding: 1rem 1.25rem;
+            border-radius: 0 12px 12px 0;
+            margin: 0.75rem 0;
+        }}
+
+        /* Status indicator pills */
+        .status-pill {{
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
+        }}
+
+        /* Table styling */
+        table {{
+            border-collapse: separate;
+            border-spacing: 0;
+        }}
+
+        th {{
+            background: {COLORS["surface"]};
+            color: {COLORS["text_muted"]};
+            font-weight: 500;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid {COLORS["border"]};
+        }}
+
+        td {{
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid {COLORS["border"]};
+            color: {COLORS["text"]};
+        }}
+
+        tr:hover td {{
+            background: {COLORS["surface_light"]};
         }}
     </style>
     """
 
 
 def get_plotly_theme() -> dict:
-    """Get Plotly theme configuration for dark mode.
+    """Get Plotly theme configuration for TrueNAS light mode.
 
     Returns:
         Dictionary with Plotly layout settings
@@ -259,35 +629,50 @@ def get_plotly_theme() -> dict:
         "paper_bgcolor": COLORS["background"],
         "plot_bgcolor": COLORS["surface"],
         "font": {
-            "color": COLORS["text"],
-            "family": "Inter, sans-serif",
+            "color": COLORS["text"],  # Dark text for light mode
+            "family": "Inter, -apple-system, BlinkMacSystemFont, SF Pro Text, sans-serif",
+            "size": 12,
         },
         "title": {
             "font": {
                 "color": COLORS["text"],
-                "size": 16,
-            }
+                "size": 14,
+            },
+            "x": 0,
+            "xanchor": "left",
         },
         "xaxis": {
             "gridcolor": COLORS["border"],
             "linecolor": COLORS["border"],
             "tickcolor": COLORS["text_muted"],
+            "tickfont": {"size": 11, "color": COLORS["text_muted"]},
+            "title": {"font": {"color": COLORS["text"], "size": 12}},
+            "gridwidth": 1,
+            "zeroline": False,
         },
         "yaxis": {
             "gridcolor": COLORS["border"],
             "linecolor": COLORS["border"],
             "tickcolor": COLORS["text_muted"],
+            "tickfont": {"size": 11, "color": COLORS["text_muted"]},
+            "title": {"font": {"color": COLORS["text"], "size": 12}},
+            "gridwidth": 1,
+            "zeroline": False,
         },
         "legend": {
-            "bgcolor": COLORS["surface"],
-            "bordercolor": COLORS["border"],
-            "font": {"color": COLORS["text"]},
+            "bgcolor": "rgba(255,255,255,0)",
+            "bordercolor": "rgba(0,0,0,0)",
+            "font": {"color": COLORS["text"], "size": 11},
         },
+        "margin": {"l": 40, "r": 20, "t": 40, "b": 40},
+        # TrueNAS color palette: cyan, green, lighter cyan, warning, critical
+        "colorway": ["#0095d5", "#71bf44", "#31beef", "#ff9500", "#ff3b30",
+                     "#5856d6", "#ff9f0a", "#34c759"],
     }
 
 
 def apply_plotly_theme(fig):
-    """Apply dark theme to a Plotly figure.
+    """Apply light theme to a Plotly figure.
 
     Args:
         fig: Plotly figure object
@@ -297,4 +682,16 @@ def apply_plotly_theme(fig):
     """
     theme = get_plotly_theme()
     fig.update_layout(**theme)
+
+    # Explicitly update axis title fonts to ensure they're visible
+    # This is needed because string titles don't inherit from theme
+    fig.update_xaxes(
+        title_font=dict(color=COLORS["text"], size=13, family="Inter, sans-serif"),
+        tickfont=dict(color=COLORS["text_muted"], size=11)
+    )
+    fig.update_yaxes(
+        title_font=dict(color=COLORS["text"], size=13, family="Inter, sans-serif"),
+        tickfont=dict(color=COLORS["text_muted"], size=11)
+    )
+
     return fig

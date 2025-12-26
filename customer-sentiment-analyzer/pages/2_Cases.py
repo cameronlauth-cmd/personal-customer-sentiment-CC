@@ -16,6 +16,41 @@ from src.dashboard.branding import (
 from src.dashboard.styles import get_global_css
 from src.dashboard.filters import get_filtered_cases, get_view_mode_indicator_html
 
+
+def render_cases_metric_detail_panel(title: str, cases_list: list, color: str):
+    """Render an expandable detail panel showing filtered cases."""
+    if not cases_list:
+        st.info(f"No cases in this category")
+        return
+
+    st.markdown(f"""
+    <div class="metric-detail-panel">
+        <div class="metric-detail-header">
+            <span class="metric-detail-title" style="color: {color};">{title} ({len(cases_list)} cases)</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Create a mini dataframe for display
+    display_data = []
+    for case in cases_list[:10]:  # Limit to top 10
+        claude = case.get("claude_analysis") or {}
+        display_data.append({
+            "Case #": case.get("case_number", "?"),
+            "Customer": case.get("customer_name", "Unknown")[:25],
+            "Criticality": f"{case.get('criticality_score', 0):.0f}",
+            "Frustration": f"{claude.get('frustration_score', 0)}/10",
+            "Severity": case.get("severity", "?"),
+        })
+
+    if display_data:
+        df = pd.DataFrame(display_data)
+        st.dataframe(df, hide_index=True, use_container_width=True)
+
+        if len(cases_list) > 10:
+            st.caption(f"Showing top 10 of {len(cases_list)} cases. Use filters above to narrow down.")
+
+
 # Page config
 st.set_page_config(
     page_title="Cases - Customer Sentiment",
@@ -52,6 +87,10 @@ with st.sidebar:
 
 
 def main():
+    # Initialize session state for metric selection (separate from Overview page)
+    if 'selected_metric_cases' not in st.session_state:
+        st.session_state['selected_metric_cases'] = None
+
     # Check for results
     if 'analysis_results' not in st.session_state:
         st.warning("No analysis results found. Please run an analysis from the main page first.")
@@ -82,6 +121,81 @@ def main():
         </p>
     </div>
     """, unsafe_allow_html=True)
+
+    # Quick summary stats - CLICKABLE
+    critical_cases = [c for c in cases if c.get("criticality_score", 0) >= 180]
+    high_cases = [c for c in cases if c.get("criticality_score", 0) >= 140 and c.get("criticality_score", 0) < 180]
+    timeline_cases = [c for c in cases if (c.get("deepseek_analysis") or {}).get("timeline_entries")]
+
+    selected = st.session_state.get('selected_metric_cases', None)
+
+    qcol1, qcol2, qcol3, qcol4 = st.columns(4)
+    with qcol1:
+        crit_color = COLORS['critical'] if len(critical_cases) > 0 else COLORS['text_muted']
+        is_active = selected == 'critical'
+        active_class = "active" if is_active else ""
+        st.markdown(f"""
+        <div class="hero-metric clickable {active_class}" style="padding: 1rem 1.5rem; border-color: {crit_color}; border-width: 2px;">
+            <div class="hero-metric-value" style="font-size: 2rem; color: {crit_color};">{len(critical_cases)}</div>
+            <div class="hero-metric-label" style="font-size: 0.75rem;">Critical (180+)</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("View details", key="cases_btn_critical", use_container_width=True):
+            st.session_state['selected_metric_cases'] = None if is_active else 'critical'
+            st.rerun()
+
+    with qcol2:
+        high_color = COLORS['warning'] if len(high_cases) > 0 else COLORS['text_muted']
+        is_active = selected == 'high'
+        active_class = "active" if is_active else ""
+        st.markdown(f"""
+        <div class="hero-metric clickable {active_class}" style="padding: 1rem 1.5rem; border-color: {high_color}; border-width: 2px;">
+            <div class="hero-metric-value" style="font-size: 2rem; color: {high_color};">{len(high_cases)}</div>
+            <div class="hero-metric-label" style="font-size: 0.75rem;">High (140-179)</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("View details", key="cases_btn_high", use_container_width=True):
+            st.session_state['selected_metric_cases'] = None if is_active else 'high'
+            st.rerun()
+
+    with qcol3:
+        is_active = selected == 'timeline'
+        active_class = "active" if is_active else ""
+        st.markdown(f"""
+        <div class="hero-metric clickable {active_class}" style="padding: 1rem 1.5rem;">
+            <div class="hero-metric-value" style="font-size: 2rem; color: {COLORS['primary']};">{len(timeline_cases)}</div>
+            <div class="hero-metric-label" style="font-size: 0.75rem;">With Timeline</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("View details", key="cases_btn_timeline", use_container_width=True):
+            st.session_state['selected_metric_cases'] = None if is_active else 'timeline'
+            st.rerun()
+
+    with qcol4:
+        st.markdown(f"""
+        <div class="hero-metric" style="padding: 1rem 1.5rem;">
+            <div class="hero-metric-value" style="font-size: 2rem; color: {COLORS['text']};">{len(cases)}</div>
+            <div class="hero-metric-label" style="font-size: 0.75rem;">Total Open</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # === DETAIL PANEL - Shows when a metric is selected ===
+    if selected:
+        st.markdown("<div style='margin-top: 1rem;'></div>", unsafe_allow_html=True)
+
+        if selected == 'critical':
+            render_cases_metric_detail_panel("Critical Cases (180+)", critical_cases, COLORS['critical'])
+        elif selected == 'high':
+            render_cases_metric_detail_panel("High Priority Cases (140-179)", high_cases, COLORS['warning'])
+        elif selected == 'timeline':
+            render_cases_metric_detail_panel("Cases with Timeline Analysis", timeline_cases, COLORS['primary'])
+
+        # Close button
+        if st.button("✕ Close", key="cases_close_detail_panel"):
+            st.session_state['selected_metric_cases'] = None
+            st.rerun()
+
+    st.divider()
 
     # Filters
     col1, col2, col3, col4 = st.columns(4)
@@ -243,7 +357,7 @@ def display_case_detail(case: dict):
         if summary_content:
             crit_color = COLORS['critical'] if criticality >= 180 else COLORS['warning']
             st.markdown(f"""
-            <div style="background: linear-gradient(135deg, {COLORS['surface']} 0%, #1a1a2e 100%);
+            <div style="background: {COLORS['surface']};
                         padding: 1.25rem; border-radius: 10px; margin-bottom: 1rem;
                         border: 1px solid {crit_color}; border-left: 4px solid {crit_color};">
                 <div style="display: flex; align-items: center; margin-bottom: 0.75rem;">
@@ -325,7 +439,7 @@ def display_case_detail(case: dict):
             # Pain points
             if deepseek.get("pain_points"):
                 st.markdown(f"""
-                <div style="background: #2d2315; border-left: 4px solid {COLORS['warning']};
+                <div style="background: {COLORS['warning_tint']}; border-left: 4px solid {COLORS['warning']};
                             padding: 15px; border-radius: 0 8px 8px 0;">
                     <strong style="color: {COLORS['warning']};">Pain Points</strong>
                     <p style="color: {COLORS['text']}; margin: 10px 0 0 0;">{deepseek['pain_points']}</p>
@@ -346,7 +460,7 @@ def display_case_detail(case: dict):
             # Recommended action
             if deepseek.get("recommended_action"):
                 st.markdown(f"""
-                <div style="background: #152d15; border-left: 4px solid {COLORS['success']};
+                <div style="background: {COLORS['success_tint']}; border-left: 4px solid {COLORS['success']};
                             padding: 15px; border-radius: 0 8px 8px 0;">
                     <strong style="color: {COLORS['success']};">Recommended Action</strong>
                     <p style="color: {COLORS['text']}; margin: 10px 0 0 0;">{deepseek['recommended_action']}</p>
@@ -391,7 +505,7 @@ def display_case_detail(case: dict):
     elif claude.get("key_phrase"):
         st.markdown(f"<h3 style='color: {COLORS['text']}'>Key Phrase</h3>", unsafe_allow_html=True)
         st.markdown(f"""
-        <div style="background: #2d2315; border-left: 4px solid {COLORS['warning']};
+        <div style="background: {COLORS['warning_tint']}; border-left: 4px solid {COLORS['warning']};
                     padding: 15px; border-radius: 0 8px 8px 0;">
             <p style="color: {COLORS['text']}; margin: 0; font-style: italic;">
                 "{claude['key_phrase']}"

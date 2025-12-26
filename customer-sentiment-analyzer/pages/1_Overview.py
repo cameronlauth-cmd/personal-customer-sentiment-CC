@@ -14,6 +14,42 @@ from src.dashboard.branding import COLORS, get_frustration_color
 from src.dashboard.styles import get_global_css, apply_plotly_theme
 from src.dashboard.filters import get_filtered_cases, get_view_mode_indicator_html
 
+
+def render_metric_detail_panel(title: str, cases: list, color: str):
+    """Render an expandable detail panel showing filtered cases."""
+    if not cases:
+        st.info(f"No cases in this category")
+        return
+
+    st.markdown(f"""
+    <div class="metric-detail-panel">
+        <div class="metric-detail-header">
+            <span class="metric-detail-title" style="color: {color};">{title} ({len(cases)} cases)</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Create a mini dataframe for display
+    display_data = []
+    for case in cases[:10]:  # Limit to top 10
+        claude = case.get("claude_analysis") or {}
+        display_data.append({
+            "Case #": case.get("case_number", "?"),
+            "Customer": case.get("customer_name", "Unknown")[:25],
+            "Frustration": f"{claude.get('frustration_score', 0)}/10",
+            "Severity": case.get("severity", "?"),
+            "Days Open": case.get("case_age_days", 0),
+        })
+
+    if display_data:
+        import pandas as pd
+        df = pd.DataFrame(display_data)
+        st.dataframe(df, hide_index=True, use_container_width=True)
+
+        if len(cases) > 10:
+            st.caption(f"Showing top 10 of {len(cases)} cases. View all in Cases page.")
+
+
 # Page config
 st.set_page_config(
     page_title="Open Case Analysis",
@@ -73,6 +109,10 @@ def get_case_status(case: dict) -> str:
 
 
 def main():
+    # Initialize session state for metric selection
+    if 'selected_metric' not in st.session_state:
+        st.session_state['selected_metric'] = None
+
     # Check for results
     if 'analysis_results' not in st.session_state:
         st.warning("No analysis results found. Please run an analysis from the main page first.")
@@ -104,7 +144,7 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # === QUICK STATS ROW ===
+    # === HERO STATS ROW - Large, Bold, Executive-Friendly ===
     stats = results.get("statistics", {})
     haiku_stats = stats.get("haiku", {})
 
@@ -128,38 +168,105 @@ def main():
         if frustration >= 7 or severity in ["S1", "S2"]:
             needs_attention.append(case)
 
+    avg_frust = haiku_stats.get("avg_frustration_score", 0)
+
+    # Hero metrics with large bold numbers - CLICKABLE
     col1, col2, col3, col4 = st.columns(4)
 
+    # Determine which metric is currently selected
+    selected = st.session_state.get('selected_metric', None)
+
     with col1:
-        st.metric(
-            "Need Immediate Attention",
-            len(needs_attention),
-            help="High frustration (7+) or S1/S2 severity"
-        )
+        # Critical metric - attention needed (CLICKABLE)
+        attention_color = COLORS['critical'] if len(needs_attention) > 0 else COLORS['success']
+        is_active = selected == 'need_attention'
+        active_class = "active" if is_active else ""
+        st.markdown(f"""
+        <div class="hero-metric clickable {active_class}" style="border-color: {attention_color}; border-width: 2px;">
+            <div class="hero-metric-value" style="color: {attention_color};">{len(needs_attention)}</div>
+            <div class="hero-metric-label">Need Attention</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("View details", key="btn_need_attention", use_container_width=True):
+            st.session_state['selected_metric'] = None if is_active else 'need_attention'
+            st.rerun()
+
     with col2:
-        st.metric(
-            "Cases Deteriorating",
-            len(deteriorating),
-            delta=f"-{len(deteriorating)}" if deteriorating else None,
-            delta_color="inverse",
-            help="Negative sentiment trend"
-        )
+        # Deteriorating - trend down indicator (CLICKABLE)
+        det_count = len(deteriorating)
+        is_active = selected == 'deteriorating'
+        active_class = "active" if is_active else ""
+        st.markdown(f"""
+        <div class="trend-down clickable {active_class}">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                <span style="font-size: 1.5rem;">📉</span>
+                <span style="font-size: 2.5rem; font-weight: 700; color: {COLORS['critical']};">{det_count}</span>
+            </div>
+            <div style="text-align: center; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: {COLORS['critical']}; font-weight: 600; margin-top: 0.25rem;">
+                Deteriorating
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("View details", key="btn_deteriorating", use_container_width=True):
+            st.session_state['selected_metric'] = None if is_active else 'deteriorating'
+            st.rerun()
+
     with col3:
-        st.metric(
-            "Cases Improving",
-            len(improving),
-            delta=f"+{len(improving)}" if improving else None,
-            help="Positive sentiment trend"
-        )
+        # Improving - trend up indicator (CLICKABLE)
+        imp_count = len(improving)
+        is_active = selected == 'improving'
+        active_class = "active" if is_active else ""
+        st.markdown(f"""
+        <div class="trend-up clickable {active_class}">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                <span style="font-size: 1.5rem;">📈</span>
+                <span style="font-size: 2.5rem; font-weight: 700; color: {COLORS['success']};">{imp_count}</span>
+            </div>
+            <div style="text-align: center; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: {COLORS['success']}; font-weight: 600; margin-top: 0.25rem;">
+                Improving
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("View details", key="btn_improving", use_container_width=True):
+            st.session_state['selected_metric'] = None if is_active else 'improving'
+            st.rerun()
+
     with col4:
-        avg_frust = haiku_stats.get("avg_frustration_score", 0)
-        st.metric("Avg Frustration", f"{avg_frust:.1f}/10")
+        # Avg frustration with color scale (NOT CLICKABLE - no case list behind it)
+        frust_color = COLORS['critical'] if avg_frust >= 7 else (COLORS['warning'] if avg_frust >= 4 else COLORS['success'])
+        st.markdown(f"""
+        <div class="hero-metric">
+            <div class="hero-metric-value" style="color: {frust_color};">{avg_frust:.1f}</div>
+            <div class="hero-metric-label">Avg Frustration /10</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # === DETAIL PANEL - Shows when a metric is selected ===
+    if selected:
+        st.markdown("<div style='margin-top: 1rem;'></div>", unsafe_allow_html=True)
+
+        if selected == 'need_attention':
+            render_metric_detail_panel("Cases Needing Attention", needs_attention, COLORS['critical'])
+        elif selected == 'deteriorating':
+            render_metric_detail_panel("Deteriorating Cases", deteriorating, COLORS['critical'])
+        elif selected == 'improving':
+            render_metric_detail_panel("Improving Cases", improving, COLORS['success'])
+
+        # Close button
+        if st.button("✕ Close", key="close_detail_panel"):
+            st.session_state['selected_metric'] = None
+            st.rerun()
 
     st.divider()
 
-    # === CUSTOMER HOTSPOTS ===
-    st.markdown(f"<h3 style='color: {COLORS['text']}'>Customer Hotspots</h3>", unsafe_allow_html=True)
-    st.markdown(f"<p style='color: {COLORS['text_muted']}'>Customers with multiple open cases may have systemic issues</p>", unsafe_allow_html=True)
+    # === CUSTOMER HOTSPOTS === (wrapped in content card)
+    st.markdown(f"""
+    <div class="content-card">
+        <div class="content-card-header">🔥 Customer Hotspots</div>
+        <p style="color: {COLORS['text_muted']}; font-size: 0.9rem; margin-bottom: 1rem;">
+            Customers with multiple open cases may have systemic issues
+        </p>
+    """, unsafe_allow_html=True)
 
     # Group cases by customer
     customer_cases = {}
@@ -185,7 +292,7 @@ def main():
             case_nums = ", ".join([str(c.get("case_number", "?")) for c in customer_case_list])
 
             st.markdown(f"""
-            <div style="background: {COLORS['surface']}; padding: 1rem; border-radius: 8px;
+            <div style="background: {COLORS['background']}; padding: 1rem; border-radius: 8px;
                         border: 1px solid {COLORS['border']}; margin-bottom: 0.5rem;
                         border-left: 4px solid {frust_color};">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -203,13 +310,22 @@ def main():
             </div>
             """, unsafe_allow_html=True)
     else:
-        st.info("No customers with multiple open cases")
+        st.markdown(f"""
+        <p style="color: {COLORS['text_muted']}; text-align: center; padding: 1rem;">
+            No customers with multiple open cases
+        </p>
+        """, unsafe_allow_html=True)
 
-    st.divider()
+    st.markdown("</div>", unsafe_allow_html=True)  # Close content-card
 
-    # === RECENT ESCALATION SIGNALS ===
-    st.markdown(f"<h3 style='color: {COLORS['text']}'>Recent Escalation Signals</h3>", unsafe_allow_html=True)
-    st.markdown(f"<p style='color: {COLORS['text_muted']}'>Cases showing signs of customer frustration or negative trends</p>", unsafe_allow_html=True)
+    # === RECENT ESCALATION SIGNALS === (wrapped in content card)
+    st.markdown(f"""
+    <div class="content-card">
+        <div class="content-card-header">⚠️ Escalation Signals</div>
+        <p style="color: {COLORS['text_muted']}; font-size: 0.9rem; margin-bottom: 1rem;">
+            Cases showing signs of customer frustration or negative trends
+        </p>
+    """, unsafe_allow_html=True)
 
     escalation_cases = []
     for case in cases:
@@ -247,7 +363,7 @@ def main():
             key_phrase = claude.get("key_phrase", "")
 
             st.markdown(f"""
-            <div style="background: {COLORS['surface']}; padding: 1rem; border-radius: 8px;
+            <div style="background: {COLORS['background']}; padding: 1rem; border-radius: 8px;
                         border: 1px solid {COLORS['border']}; margin-bottom: 0.5rem;
                         border-left: 4px solid {frust_color};">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -265,12 +381,18 @@ def main():
             </div>
             """, unsafe_allow_html=True)
     else:
-        st.success("No escalation signals detected")
+        st.markdown(f"""
+        <p style="color: {COLORS['success']}; text-align: center; padding: 1rem;">
+            ✓ No escalation signals detected
+        </p>
+        """, unsafe_allow_html=True)
 
-    st.divider()
+    st.markdown("</div>", unsafe_allow_html=True)  # Close content-card
 
     # === KEY METRICS ROW ===
-    st.markdown(f"<h3 style='color: {COLORS['text']}'>Analysis Metrics</h3>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="section-header">📊 Analysis Metrics</div>
+    """, unsafe_allow_html=True)
 
     m1, m2, m3, m4, m5 = st.columns(5)
 
@@ -291,7 +413,12 @@ def main():
 
     st.divider()
 
-    # === DISTRIBUTIONS ===
+    # === DISTRIBUTIONS === (wrapped in content card)
+    st.markdown(f"""
+    <div class="content-card">
+        <div class="content-card-header">📈 Distributions</div>
+    """, unsafe_allow_html=True)
+
     distributions = results.get("distributions", {})
 
     col1, col2 = st.columns(2)
@@ -304,11 +431,16 @@ def main():
                 labels=list(severity_dist.keys()),
                 values=list(severity_dist.values()),
                 hole=0.4,
-                marker_colors=[COLORS['critical'], COLORS['warning'], COLORS['secondary'], COLORS['text_muted']]
+                marker_colors=[COLORS['critical'], COLORS['warning'], COLORS['secondary'], COLORS['text_muted']],
+                textfont=dict(color=COLORS['text'], size=12),
+                textinfo='label+percent',
+                insidetextorientation='radial'
             )])
             fig = apply_plotly_theme(fig)
-            fig.update_layout(height=350)
+            fig.update_layout(height=350, showlegend=True)
             st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No severity distribution data available")
 
     with col2:
         st.markdown(f"<h4 style='color: {COLORS['text']}'>Support Level Distribution</h4>", unsafe_allow_html=True)
@@ -318,11 +450,16 @@ def main():
                 labels=list(support_dist.keys()),
                 values=list(support_dist.values()),
                 hole=0.4,
-                marker_colors=[COLORS['warning'], COLORS['secondary'], COLORS['text_muted'], COLORS['border']]
+                marker_colors=[COLORS['warning'], COLORS['secondary'], COLORS['text_muted'], COLORS['border']],
+                textfont=dict(color=COLORS['text'], size=12),
+                textinfo='label+percent',
+                insidetextorientation='radial'
             )])
             fig = apply_plotly_theme(fig)
-            fig.update_layout(height=350)
+            fig.update_layout(height=350, showlegend=True)
             st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No support level distribution data available")
 
     # Issue classes and resolution outlooks
     col1, col2 = st.columns(2)
@@ -352,6 +489,8 @@ def main():
             fig = apply_plotly_theme(fig)
             fig.update_layout(height=350)
             st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)  # Close content-card
 
 
 if __name__ == "__main__":

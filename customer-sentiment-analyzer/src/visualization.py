@@ -9,31 +9,34 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import numpy as np
 
+# Import central branding colors
+from src.dashboard.branding import COLORS as BRAND_COLORS
 
-# Color schemes
+
+# Color schemes - aligned with TrueNAS light theme
 COLORS = {
     "frustration": {
-        "high": "#dc2626",      # Red
-        "medium": "#ea580c",    # Orange
-        "low": "#fbbf24",       # Yellow
-        "none": "#10b981",      # Green
+        "high": BRAND_COLORS["critical"],     # Apple red #ff3b30
+        "medium": BRAND_COLORS["warning"],    # Apple orange #ff9500
+        "low": BRAND_COLORS["secondary"],     # TrueNAS lighter cyan #31beef
+        "none": BRAND_COLORS["success"],      # TrueNAS green #71bf44
     },
     "severity": {
-        "S1": "#DC143C",        # Crimson
-        "S2": "#FFA500",        # Orange
-        "S3": "#4169E1",        # Royal Blue
-        "S4": "#90EE90",        # Light Green
+        "S1": BRAND_COLORS["critical"],       # Apple red
+        "S2": BRAND_COLORS["warning"],        # Apple orange
+        "S3": BRAND_COLORS["primary"],        # TrueNAS cyan
+        "S4": BRAND_COLORS["success"],        # TrueNAS green
     },
     "support": {
         "Gold": "#FFD700",
         "Silver": "#C0C0C0",
         "Bronze": "#CD7F32",
-        "Unknown": "#808080",
+        "Unknown": BRAND_COLORS["text_muted"],
     },
     "chart": {
-        "primary": "#1e40af",
-        "secondary": "#16a34a",
-        "accent": "#ea580c",
+        "primary": BRAND_COLORS["primary"],   # TrueNAS cyan #0095d5
+        "secondary": BRAND_COLORS["accent"],  # TrueNAS green #71bf44
+        "accent": BRAND_COLORS["warning"],    # Apple orange #ff9500
     }
 }
 
@@ -197,8 +200,8 @@ def create_issue_categories_chart(issue_classes: Dict) -> go.Figure:
             'yanchor': 'top',
             'font': {'size': 18, 'color': COLORS["chart"]["primary"]}
         },
-        xaxis_title="Issue Category",
-        yaxis_title="Number of Cases",
+        xaxis_title=dict(text="Issue Category", font=dict(color=BRAND_COLORS["text"], size=13)),
+        yaxis_title=dict(text="Number of Cases", font=dict(color=BRAND_COLORS["text"], size=13)),
         xaxis_tickangle=-45,
         margin=dict(t=80, b=120, l=60, r=40),
         showlegend=False,
@@ -240,8 +243,8 @@ def create_top_25_critical_chart(cases: List[Dict]) -> go.Figure:
             'yanchor': 'top',
             'font': {'size': 18, 'color': COLORS["chart"]["primary"]}
         },
-        xaxis_title="Criticality Score",
-        yaxis_title="Case Number",
+        xaxis_title=dict(text="Criticality Score", font=dict(color=BRAND_COLORS["text"], size=13)),
+        yaxis_title=dict(text="Case Number", font=dict(color=BRAND_COLORS["text"], size=13)),
         yaxis=dict(
             autorange="reversed",  # Highest at top
             type='category'  # Force categorical axis for case numbers
@@ -289,16 +292,16 @@ def create_score_breakdown_chart(cases: List[Dict]) -> go.Figure:
         components["Engagement"].append(breakdown.get("customer_engagement", 0))
         components["Case Age"].append(breakdown.get("case_age", 0))
 
-    # Colors for each component
+    # Colors for each component - TrueNAS/Apple palette
     colors = [
-        "#DC143C",  # Claude Frustration - Red
-        "#8B4513",  # Resolution Outlook - Brown
-        "#FF6347",  # Issue Class - Tomato
-        "#FFA500",  # Severity - Orange
-        "#4169E1",  # Message Volume - Blue
-        "#9370DB",  # Support Level - Purple
-        "#90EE90",  # Engagement - Light Green
-        "#D3D3D3",  # Case Age - Gray
+        BRAND_COLORS["critical"],   # Claude Frustration - Apple red
+        "#8B5A2B",                   # Resolution Outlook - Brown (neutral)
+        BRAND_COLORS["warning"],    # Issue Class - Apple orange
+        "#ff9f0a",                   # Severity - Lighter orange
+        BRAND_COLORS["primary"],    # Message Volume - TrueNAS cyan
+        "#5856d6",                   # Support Level - Purple
+        BRAND_COLORS["success"],    # Engagement - TrueNAS green
+        BRAND_COLORS["text_muted"], # Case Age - Gray
     ]
 
     fig = go.Figure()
@@ -320,8 +323,8 @@ def create_score_breakdown_chart(cases: List[Dict]) -> go.Figure:
             'yanchor': 'top',
             'font': {'size': 18, 'color': COLORS["chart"]["primary"]}
         },
-        xaxis_title="Case Number",
-        yaxis_title="Points",
+        xaxis_title=dict(text="Case Number", font=dict(color=BRAND_COLORS["text"], size=13)),
+        yaxis_title=dict(text="Points", font=dict(color=BRAND_COLORS["text"], size=13)),
         xaxis=dict(type='category'),  # Force categorical axis for case numbers
         barmode='stack',
         legend=dict(
@@ -329,7 +332,8 @@ def create_score_breakdown_chart(cases: List[Dict]) -> go.Figure:
             yanchor="bottom",
             y=-0.3,
             xanchor="center",
-            x=0.5
+            x=0.5,
+            font=dict(color=BRAND_COLORS["text"])
         ),
         margin=dict(t=80, b=120, l=60, r=40),
     )

@@ -70,14 +70,14 @@ def create_top_cases_chart(cases: list, top_n: int = 10) -> go.Figure:
         textposition='outside'
     ))
 
-    fig = apply_plotly_theme(fig)
     fig.update_layout(
-        title=f"Top {top_n} Cases by Criticality Score",
-        xaxis_title="Criticality Score",
+        title=dict(text=f"Top {top_n} Cases by Criticality Score", font=dict(color=COLORS['text'])),
+        xaxis_title=dict(text="Criticality Score", font=dict(color=COLORS['text'], size=13)),
         yaxis_title="",
         height=400,
         yaxis=dict(autorange="reversed")
     )
+    fig = apply_plotly_theme(fig)
     return fig
 
 
@@ -93,14 +93,14 @@ def create_frustration_histogram(cases: list) -> go.Figure:
         marker_line_width=1
     ))
 
-    fig = apply_plotly_theme(fig)
     fig.update_layout(
-        title="Frustration Score Distribution",
-        xaxis_title="Frustration Score",
-        yaxis_title="Number of Cases",
+        title=dict(text="Frustration Score Distribution", font=dict(color=COLORS['text'])),
+        xaxis_title=dict(text="Frustration Score", font=dict(color=COLORS['text'], size=13)),
+        yaxis_title=dict(text="Number of Cases", font=dict(color=COLORS['text'], size=13)),
         height=350,
         bargap=0.1
     )
+    fig = apply_plotly_theme(fig)
     return fig
 
 
@@ -143,19 +143,19 @@ def create_severity_frustration_scatter(cases: list) -> go.Figure:
                 hovertemplate="Case: %{text}<br>Frustration: %{y}<br>Severity: " + sev + "<extra></extra>"
             ))
 
-    fig = apply_plotly_theme(fig)
     fig.update_layout(
-        title="Severity vs Frustration (bubble size = criticality)",
+        title=dict(text="Severity vs Frustration (bubble size = criticality)", font=dict(color=COLORS['text'])),
         xaxis=dict(
-            title="Severity",
+            title=dict(text="Severity", font=dict(color=COLORS['text'], size=13)),
             tickmode='array',
             tickvals=[1, 2, 3, 4],
             ticktext=["S4", "S3", "S2", "S1"]
         ),
-        yaxis_title="Frustration Score",
+        yaxis_title=dict(text="Frustration Score", font=dict(color=COLORS['text'], size=13)),
         height=400,
         showlegend=True
     )
+    fig = apply_plotly_theme(fig)
     return fig
 
 
@@ -177,13 +177,13 @@ def create_issue_class_chart(distributions: dict) -> go.Figure:
         textposition='outside'
     ))
 
-    fig = apply_plotly_theme(fig)
     fig.update_layout(
-        title="Issue Classifications",
-        xaxis_title="Number of Cases",
+        title=dict(text="Issue Classifications", font=dict(color=COLORS['text'])),
+        xaxis_title=dict(text="Number of Cases", font=dict(color=COLORS['text'], size=13)),
         yaxis_title="",
         height=300
     )
+    fig = apply_plotly_theme(fig)
     return fig
 
 
@@ -212,11 +212,11 @@ def create_resolution_chart(distributions: dict) -> go.Figure:
         marker_colors=colors
     )])
 
-    fig = apply_plotly_theme(fig)
     fig.update_layout(
-        title="Resolution Outlooks",
+        title=dict(text="Resolution Outlooks", font=dict(color=COLORS['text'])),
         height=300
     )
+    fig = apply_plotly_theme(fig)
     return fig
 
 
@@ -242,13 +242,13 @@ def create_case_age_vs_frustration(cases: list) -> go.Figure:
         hovertemplate="Case: %{text}<br>Age: %{x} days<br>Frustration: %{y}<extra></extra>"
     ))
 
-    fig = apply_plotly_theme(fig)
     fig.update_layout(
-        title="Case Age vs Frustration Score",
-        xaxis_title="Case Age (days)",
-        yaxis_title="Frustration Score",
+        title=dict(text="Case Age vs Frustration Score", font=dict(color=COLORS['text'])),
+        xaxis_title=dict(text="Case Age (days)", font=dict(color=COLORS['text'], size=13)),
+        yaxis_title=dict(text="Frustration Score", font=dict(color=COLORS['text'], size=13)),
         height=400
     )
+    fig = apply_plotly_theme(fig)
     return fig
 
 
@@ -273,13 +273,13 @@ def create_priority_distribution(cases: list) -> go.Figure:
         textposition='outside'
     ))
 
-    fig = apply_plotly_theme(fig)
     fig.update_layout(
-        title="Priority Distribution",
-        xaxis_title="Priority Level",
-        yaxis_title="Number of Cases",
+        title=dict(text="Priority Distribution", font=dict(color=COLORS['text'])),
+        xaxis_title=dict(text="Priority Level", font=dict(color=COLORS['text'], size=13)),
+        yaxis_title=dict(text="Number of Cases", font=dict(color=COLORS['text'], size=13)),
         height=300
     )
+    fig = apply_plotly_theme(fig)
     return fig
 
 
@@ -317,7 +317,7 @@ def main():
     """, unsafe_allow_html=True)
 
     # Top critical cases
-    st.markdown(f"<h3 style='color: {COLORS['text']}'>Critical Cases</h3>", unsafe_allow_html=True)
+    st.markdown(f"""<div class="section-header">🎯 Top Critical Cases</div>""", unsafe_allow_html=True)
     fig = create_top_cases_chart(cases, top_n=10)
     st.plotly_chart(fig, use_container_width=True)
 
@@ -376,7 +376,7 @@ def main():
 
     # Summary statistics table
     st.divider()
-    st.markdown(f"<h3 style='color: {COLORS['text']}'>Analysis Summary</h3>", unsafe_allow_html=True)
+    st.markdown(f"""<div class="section-header">📋 Analysis Summary</div>""", unsafe_allow_html=True)
 
     stats = results.get("statistics", {})
     haiku_stats = stats.get("haiku", {})
