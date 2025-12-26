@@ -179,6 +179,60 @@ def get_global_css() -> str:
             margin-top: 0.5rem;
         }}
 
+        /* Clickable hero metrics */
+        .hero-metric.clickable {{
+            cursor: pointer;
+        }}
+
+        .hero-metric.clickable:hover {{
+            border-color: {COLORS["primary"]};
+        }}
+
+        .hero-metric.active {{
+            border-color: {COLORS["primary"]};
+            border-width: 2px;
+            box-shadow: 0 0 0 3px rgba(0, 149, 213, 0.2);
+        }}
+
+        /* Metric detail panel - expands below metrics row */
+        .metric-detail-panel {{
+            background: {COLORS["surface"]};
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-top: 1rem;
+            border: 1px solid {COLORS["border"]};
+            box-shadow: {COLORS["shadow"]};
+        }}
+
+        .metric-detail-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid {COLORS["border"]};
+        }}
+
+        .metric-detail-title {{
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: {COLORS["text"]};
+        }}
+
+        .metric-detail-close {{
+            cursor: pointer;
+            color: {COLORS["text_muted"]};
+            font-size: 1.25rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            transition: all 0.15s ease;
+        }}
+
+        .metric-detail-close:hover {{
+            background: {COLORS["surface_light"]};
+            color: {COLORS["text"]};
+        }}
+
         /* Trend indicators with bold backgrounds */
         .trend-up {{
             background: {COLORS["success_tint"]};
@@ -217,6 +271,25 @@ def get_global_css() -> str:
             font-size: 0.9rem;
             margin-top: -0.75rem;
             margin-bottom: 1rem;
+        }}
+
+        /* Content cards - Wrap major sections */
+        .content-card {{
+            background: {COLORS["surface"]};
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            border: 1px solid {COLORS["border"]};
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        }}
+
+        .content-card-header {{
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: {COLORS["text"]};
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid {COLORS["border"]};
         }}
 
         /* Expanders - Clean card style for light theme */
@@ -266,52 +339,10 @@ def get_global_css() -> str:
             color: {COLORS["text"]} !important;
         }}
 
-        /* Dataframes - iX Blue Theme */
+        /* Dataframes - Streamlit uses Canvas-based Glide Data Grid, limited CSS control */
         .stDataFrame {{
-            background-color: {COLORS["background"]};
             border-radius: 8px;
             border: 1px solid {COLORS["border"]};
-        }}
-
-        [data-testid="stDataFrame"] > div {{
-            background-color: {COLORS["background"]};
-        }}
-
-        /* Dataframe header - iX Blue */
-        [data-testid="stDataFrame"] thead tr th {{
-            background-color: {COLORS["primary"]} !important;
-            color: white !important;
-            font-weight: 600 !important;
-            padding: 0.75rem 1rem !important;
-            border-bottom: 2px solid #0080b8 !important;
-        }}
-
-        /* Dataframe cells */
-        [data-testid="stDataFrame"] tbody tr td {{
-            color: {COLORS["text"]} !important;
-            background-color: {COLORS["background"]} !important;
-            padding: 0.5rem 1rem !important;
-            border-bottom: 1px solid {COLORS["border"]} !important;
-        }}
-
-        /* Dataframe row hover */
-        [data-testid="stDataFrame"] tbody tr:hover td {{
-            background-color: {COLORS["surface"]} !important;
-        }}
-
-        /* Dataframe selected row */
-        [data-testid="stDataFrame"] tbody tr[data-selected="true"] td {{
-            background-color: rgba(0, 149, 213, 0.15) !important;
-            border-left: 3px solid {COLORS["primary"]} !important;
-        }}
-
-        /* Progress columns in dataframe */
-        [data-testid="stDataFrame"] [role="progressbar"] {{
-            background-color: {COLORS["surface_light"]} !important;
-        }}
-
-        [data-testid="stDataFrame"] [role="progressbar"] > div {{
-            background-color: {COLORS["primary"]} !important;
         }}
 
         /* Buttons - TrueNAS rounded style with Apple transitions */
