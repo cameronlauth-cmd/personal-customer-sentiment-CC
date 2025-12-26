@@ -3,28 +3,39 @@ Branding and color system for Customer Sentiment Analyzer Dashboard.
 Provides consistent colors, health score helpers, and styling utilities.
 """
 
-# Color palette - Dark theme with accent colors
+# Color palette - Enterprise dark theme with refined aesthetics
 COLORS = {
-    # Brand Colors
-    "primary": "#0095D5",       # TrueNAS Blue
-    "secondary": "#31BEEC",     # Light Blue
-    "accent": "#71BF44",        # Green for CTAs
+    # Brand Colors - Professional blue spectrum
+    "primary": "#3b82f6",       # Modern blue - more vibrant
+    "secondary": "#60a5fa",     # Light blue for accents
+    "accent": "#10b981",        # Emerald green for CTAs
 
-    # Dark Theme
-    "background": "#0d1117",    # Page background
-    "surface": "#161b22",       # Card backgrounds
-    "surface_light": "#21262d", # Hover states
-    "border": "#30363d",        # Borders
+    # Dark Theme - Sophisticated neutrals
+    "background": "#0f172a",    # Slate 900 - deep navy
+    "surface": "#1e293b",       # Slate 800 - card backgrounds
+    "surface_light": "#334155", # Slate 700 - hover states
+    "border": "#475569",        # Slate 600 - subtle borders
 
-    # Text
-    "text": "#FFFFFF",
-    "text_muted": "#8b949e",
+    # Text - High contrast hierarchy
+    "text": "#f8fafc",          # Slate 50 - primary text
+    "text_muted": "#94a3b8",    # Slate 400 - secondary text
 
-    # Status Colors
-    "critical": "#dc3545",      # Red
-    "warning": "#ffc107",       # Yellow/Orange
-    "success": "#28a745",       # Green
-    "info": "#0095D5",          # Blue
+    # Status Colors - Enterprise palette
+    "critical": "#ef4444",      # Red 500 - errors/critical
+    "warning": "#f59e0b",       # Amber 500 - warnings
+    "success": "#10b981",       # Emerald 500 - success
+    "info": "#3b82f6",          # Blue 500 - info
+
+    # Gradient (for headers) - Subtle professional gradient
+    "gradient": "linear-gradient(135deg, #3b82f6 0%, #10b981 100%)",
+
+    # Glass effects - Modern frosted glass
+    "glass": "rgba(30, 41, 59, 0.8)",  # Frosted glass effect base
+    "shadow": "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1)",
+
+    # Additional enterprise colors
+    "surface_elevated": "#273548",  # Elevated surfaces
+    "border_subtle": "#334155",     # Subtle borders
 }
 
 # Health score thresholds
@@ -160,7 +171,7 @@ def format_score_badge(score: float, max_score: float = 10) -> str:
 
 
 def create_header(title: str, subtitle: str = "") -> str:
-    """Create a branded header HTML.
+    """Create a branded header HTML with enterprise styling.
 
     Args:
         title: Main title text
@@ -169,20 +180,27 @@ def create_header(title: str, subtitle: str = "") -> str:
     Returns:
         HTML string for header
     """
-    subtitle_html = f'<p style="color: {COLORS["text_muted"]}; margin: 5px 0 0 0;">{subtitle}</p>' if subtitle else ""
+    subtitle_html = f'<p style="color: {COLORS["text_muted"]}; margin: 10px 0 0 0; font-weight: 400; font-size: 0.95rem;">{subtitle}</p>' if subtitle else ""
 
     return f"""
-    <div style="background: linear-gradient(135deg, {COLORS["surface"]} 0%, {COLORS["background"]} 100%);
-                padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem;
-                border: 1px solid {COLORS["border"]}; border-left: 4px solid {COLORS["primary"]};">
-        <h1 style="color: {COLORS["primary"]}; margin: 0; font-size: 1.8rem;">{title}</h1>
+    <div style="background: linear-gradient(180deg, {COLORS["surface"]} 0%, {COLORS["background"]} 100%);
+                padding: 2rem 2.5rem;
+                border-radius: 12px;
+                margin-bottom: 1.5rem;
+                border: 1px solid {COLORS["border_subtle"]};
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
+                position: relative;">
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 2px;
+                    background: {COLORS["gradient"]}; border-radius: 12px 12px 0 0;"></div>
+        <h1 style="color: {COLORS["primary"]}; margin: 0; font-size: 1.625rem; font-weight: 600;
+                   letter-spacing: -0.025em; line-height: 1.2;">{title}</h1>
         {subtitle_html}
     </div>
     """
 
 
 def create_metric_card(label: str, value: str, color: str = None) -> str:
-    """Create a styled metric card HTML.
+    """Create a styled metric card HTML with enterprise design.
 
     Args:
         label: Metric label
@@ -195,9 +213,15 @@ def create_metric_card(label: str, value: str, color: str = None) -> str:
     accent = color or COLORS["primary"]
 
     return f"""
-    <div style="background: {COLORS["surface"]}; padding: 1rem; border-radius: 8px;
-                border: 1px solid {COLORS["border"]}; border-top: 3px solid {accent};">
-        <p style="color: {COLORS["text_muted"]}; margin: 0; font-size: 0.85rem;">{label}</p>
-        <p style="color: {COLORS["text"]}; margin: 5px 0 0 0; font-size: 1.5rem; font-weight: bold;">{value}</p>
+    <div style="background: {COLORS["surface"]};
+                padding: 1.25rem 1.5rem;
+                border-radius: 8px;
+                border: 1px solid {COLORS["border_subtle"]};
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+                transition: border-color 0.15s ease, box-shadow 0.15s ease;">
+        <p style="color: {COLORS["text_muted"]}; margin: 0; font-size: 0.75rem;
+                  font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em;">{label}</p>
+        <p style="color: {accent}; margin: 6px 0 0 0; font-size: 1.5rem;
+                  font-weight: 600; letter-spacing: -0.02em; line-height: 1.2;">{value}</p>
     </div>
     """
